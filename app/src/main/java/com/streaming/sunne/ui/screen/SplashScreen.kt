@@ -13,9 +13,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.streaming.sune.ui.theme.DarkBackground
-import com.streaming.sune.ui.theme.NetflixRed
-import com.streaming.sune.ui.theme.White
+import com.streaming.sunne.ui.theme.DarkBackground
+import com.streaming.sunne.ui.theme.NetflixRed
+import com.streaming.sunne.ui.theme.White
 import kotlinx.coroutines.delay
 
 /**

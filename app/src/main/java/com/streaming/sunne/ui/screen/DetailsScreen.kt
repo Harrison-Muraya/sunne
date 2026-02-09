@@ -23,8 +23,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
-import com.streaming.sune.data.model.Stream
-import com.streaming.sune.ui.theme.*
+import com.streaming.sunne.data.model.Stream
+import com.streaming.sunne.ui.theme.*
 
 /**
  * Details Screen - Shows detailed information about a selected stream

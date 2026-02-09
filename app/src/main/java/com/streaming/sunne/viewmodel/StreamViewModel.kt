@@ -3,7 +3,7 @@ package com.streaming.sunne.viewmodel
 import androidx.lifecycle.viewModelScope
 import com.streaming.sunne.data.model.Stream
 import com.streaming.sunne.data.model.StreamCategory
-import com.streaming.sunne.data.repository.StreamRepository
+import com.streaming.sunne.repository.StreamRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,24 +40,24 @@ class StreamViewModel {
      * Load all streams grouped by category
      */
     fun loadStreams() {
-        viewModelScope.launch {
-            _uiState.value = StreamUiState.Loading
-
-            val result = repository.getStreamsByCategory()
-
-            _uiState.value = if (result.isSuccess) {
-                val categories = result.getOrNull() ?: emptyList()
-                if (categories.isEmpty()) {
-                    StreamUiState.Error("No streams available")
-                } else {
-                    StreamUiState.Success(categories)
-                }
-            } else {
-                StreamUiState.Error(
-                    result.exceptionOrNull()?.message ?: "Failed to load streams"
-                )
-            }
-        }
+//        viewModelScope.launch {
+//            _uiState.value = StreamUiState.Loading
+//
+//            val result = repository.getStreamsByCategory()
+//
+//            _uiState.value = if (result.isSuccess) {
+//                val categories = result.getOrNull() ?: emptyList()
+//                if (categories.isEmpty()) {
+//                    StreamUiState.Error("No streams available")
+//                } else {
+//                    StreamUiState.Success(categories)
+//                }
+//            } else {
+//                StreamUiState.Error(
+//                    result.exceptionOrNull()?.message ?: "Failed to load streams"
+//                )
+//            }
+//        }
     }
 
     /**

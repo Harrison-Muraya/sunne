@@ -1,3 +1,5 @@
+//import androidx.glance.appwidget.compose
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -42,6 +44,10 @@ kotlin {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
+    //... other dependencies
+    implementation(libs.androidx.lifecycle.viewmodel.compose) // <-- Add this line
+    //...
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -69,8 +75,8 @@ dependencies {
 
 
     // ViewModel
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+    // implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    // implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
 
     // Material Design
     implementation("com.google.android.material:material:1.12.0")
@@ -103,7 +109,8 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     // System UI
-    implementation("com.google.accompanist:accompanist-systemuicontroller:0.31.4-beta")
+    // implementation("com.google.accompanist:accompanist-systemuicontroller:0.31.4-beta")
+
 
     // ExoPlayer
     implementation("com.google.android.exoplayer:exoplayer:2.19.0")
