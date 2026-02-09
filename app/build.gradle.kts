@@ -109,7 +109,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     // System UI
-    // implementation("com.google.accompanist:accompanist-systemuicontroller:0.31.4-beta")
+     implementation("com.google.accompanist:accompanist-systemuicontroller:0.31.4-beta")
 
 
     // ExoPlayer

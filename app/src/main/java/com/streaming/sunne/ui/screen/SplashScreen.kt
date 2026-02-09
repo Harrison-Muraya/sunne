@@ -1,4 +1,4 @@
-package com.streaming.sune.ui.screen
+package com.streaming.sunne.ui.screen
 
 //package com.sune.tv.ui.screens
 

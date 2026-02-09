@@ -15,8 +15,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-//import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import com.streaming.sunne.ui.screen.*
+//import com.streaming.sunne.ui.screen.SplashScreen.kt
 import com.streaming.sunne.ui.theme.DarkBackground
 import com.streaming.sunne.ui.theme.SunneTheme
 import com.streaming.sunne.viewmodel.StreamViewModel
@@ -32,10 +33,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             SunneTheme {
                 // Set status bar color
-//                val systemUiController = rememberSystemUiController()
-//                systemUiController.setSystemBarsColor(
-//                    color = DarkBackground
-//                )
+                val systemUiController = rememberSystemUiController()
+                systemUiController.setSystemBarsColor(
+                    color = DarkBackground
+                )
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -54,63 +55,63 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun SunneApp() {
     val navController = rememberNavController()
-//    val viewModel: StreamViewModel = viewModel()
+    val viewModel: StreamViewModel = viewModel<StreamViewModel>()
 
     NavHost(
         navController = navController,
         startDestination = Screen.Splash.route
     ) {
         // Splash Screen
-//        composable(Screen.Splash.route) {
-//            SplashScreen(
-//                onNavigateToHome = {
-//                    navController.navigate(Screen.Home.route) {
-//                        popUpTo(Screen.Splash.route) { inclusive = true }
-//                    }
-//                }
-//            )
-//        }
+        composable(Screen.Splash.route) {
+            SplashScreen(
+                onNavigateToHome = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Splash.route) { inclusive = true }
+                    }
+                }
+            )
+        }
 
         // Home Screen
-//        composable(Screen.Home.route) {
-//            HomeScreen(
-//                viewModel = viewModel,
-//                onStreamClick = { stream ->
-//                    viewModel.selectStream(stream)
-//                    navController.navigate(Screen.Details.route)
-//                }
-//            )
-//        }
+        composable(Screen.Home.route) {
+            HomeScreen(
+                viewModel = viewModel,
+                onStreamClick = { stream ->
+                    viewModel.selectStream(stream)
+                    navController.navigate(Screen.Details.route)
+                }
+            )
+        }
 
         // Details Screen
-//        composable(Screen.Details.route) {
-//            val selectedStream = viewModel.selectedStream.value
-//            if (selectedStream != null) {
-//                DetailsScreen(
-//                    stream = selectedStream,
-//                    onPlayClick = { stream ->
-//                        viewModel.selectStream(stream)
-//                        navController.navigate(Screen.Player.route)
-//                    },
-//                    onBackClick = {
-//                        navController.popBackStack()
-//                    }
-//                )
-//            }
-//        }
+        composable(Screen.Details.route) {
+            val selectedStream = viewModel.selectedStream.value
+            if (selectedStream != null) {
+                DetailsScreen(
+                    stream = selectedStream,
+                    onPlayClick = { stream ->
+                        viewModel.selectStream(stream)
+                        navController.navigate(Screen.Player.route)
+                    },
+                    onBackClick = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+        }
 
         // Player Screen
-//        composable(Screen.Player.route) {
-//            val selectedStream = viewModel.selectedStream.value
-//            if (selectedStream != null) {
-//                PlayerScreen(
-//                    stream = selectedStream,
-//                    onBackPress = {
-//                        navController.popBackStack()
-//                    }
-//                )
-//            }
-//        }
+        composable(Screen.Player.route) {
+            val selectedStream = viewModel.selectedStream.value
+            if (selectedStream != null) {
+                PlayerScreen(
+                    stream = selectedStream,
+                    onBackPress = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+        }
     }
 }
 

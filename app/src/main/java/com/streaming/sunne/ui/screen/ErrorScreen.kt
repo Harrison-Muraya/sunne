@@ -1,5 +1,4 @@
-package com.streaming.sune.ui.screen
-
+package com.streaming.sunne.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

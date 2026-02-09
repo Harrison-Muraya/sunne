@@ -23,7 +23,7 @@ sealed class StreamUiState : ViewModel() {
  * ViewModel for managing stream data and UI state
  */
 
-class StreamViewModel {
+class StreamViewModel : ViewModel(){
     private val repository = StreamRepository()
 
     private val _uiState = MutableStateFlow<StreamUiState>(StreamUiState.Loading)
