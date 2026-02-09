@@ -56,7 +56,7 @@ fun SplashScreen(
         ) {
             // App Logo/Name
             Text(
-                text = "SUNE",
+                text = "SUNNE",
                 fontSize = 72.sp,
                 fontWeight = FontWeight.Bold,
                 color = NetflixRed,
