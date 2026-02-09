@@ -20,7 +20,7 @@ private val DarkColorPalette = darkColors(
 )
 
 @Composable
-fun SuneTheme(
+fun SunneTheme(
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
