@@ -53,10 +53,20 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.leanback)
     implementation(libs.glide)
+    implementation(libs.androidx.compose.material3)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // compose
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material:material")          // 👈 Needed for Typography
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+
 
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
@@ -84,6 +94,19 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+
+
+    // Navigation
+    implementation("androidx.navigation:navigation-compose:2.8.0")
+
+    // Image Loading
+    implementation("io.coil-kt:coil-compose:2.6.0")
+
+    // System UI
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.31.4-beta")
+
+    // ExoPlayer
+    implementation("com.google.android.exoplayer:exoplayer:2.19.0")
 }
 
 

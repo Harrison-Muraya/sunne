@@ -30,6 +30,7 @@ androidx-navigation-fragment-ktx = { group = "androidx.navigation", name = "navi
 androidx-navigation-ui-ktx = { group = "androidx.navigation", name = "navigation-ui-ktx", version.ref = "navigation" }
 androidx-leanback = { group = "androidx.leanback", name = "leanback", version.ref = "leanback" }
 glide = { group = "com.github.bumptech.glide", name = "glide", version.ref = "glide" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
