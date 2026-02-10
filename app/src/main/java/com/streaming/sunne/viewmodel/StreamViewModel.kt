@@ -40,24 +40,24 @@ class StreamViewModel : ViewModel(){
      * Load all streams grouped by category
      */
     fun loadStreams() {
-//        viewModelScope.launch {
-//            _uiState.value = StreamUiState.Loading
-//
-//            val result = repository.getStreamsByCategory()
-//
-//            _uiState.value = if (result.isSuccess) {
-//                val categories = result.getOrNull() ?: emptyList()
-//                if (categories.isEmpty()) {
-//                    StreamUiState.Error("No streams available")
-//                } else {
-//                    StreamUiState.Success(categories)
-//                }
-//            } else {
-//                StreamUiState.Error(
-//                    result.exceptionOrNull()?.message ?: "Failed to load streams"
-//                )
-//            }
-//        }
+        viewModelScope.launch {
+            _uiState.value = StreamUiState.Loading
+
+            val result = repository.getStreamsByCategory()
+
+            _uiState.value = if (result.isSuccess) {
+                val categories = result.getOrNull() ?: emptyList()
+                if (categories.isEmpty()) {
+                    StreamUiState.Error("No streams available")
+                } else {
+                    StreamUiState.Success(categories)
+                }
+            } else {
+                StreamUiState.Error(
+                    result.exceptionOrNull()?.message ?: "Failed to load streams"
+                )
+            }
+        }
     }
 
     /**
