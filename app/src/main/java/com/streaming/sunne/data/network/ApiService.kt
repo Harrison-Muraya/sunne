@@ -1,6 +1,7 @@
 package com.streaming.sunne.data.network
 
 import com.streaming.sunne.data.model.Stream
+import com.streaming.sunne.data.model.StreamResponse
 import retrofit2.Response
 import retrofit2.http.GET
 import retrofit2.http.Path
@@ -14,7 +15,8 @@ interface ApiService {
      * Get all available streams
      */
     @GET("api/streams")
-    suspend fun getStreams(): Response<List<Stream>>
+    suspend fun getStreams(): Response<StreamResponse>
+//    suspend fun getStreams(): Response<List<Stream>>
 
     /**
      * Get details of a specific stream by ID

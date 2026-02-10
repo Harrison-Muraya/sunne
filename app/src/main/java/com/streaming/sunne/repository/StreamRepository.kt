@@ -2,6 +2,7 @@ package com.streaming.sunne.repository
 
 import com.streaming.sunne.data.model.Stream
 import com.streaming.sunne.data.model.StreamCategory
+import com.streaming.sunne.data.model.StreamResponse
 import com.streaming.sunne.data.network.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -12,7 +13,7 @@ class StreamRepository {
     /**
      * Fetch all streams from the backend
      */
-    suspend fun getStreams(): Result<List<Stream>> = withContext(Dispatchers.IO) {
+    suspend fun getStreams(): Result<StreamResponse> = withContext(Dispatchers.IO) {
         try {
             val response = apiService.getStreams()
             if (response.isSuccessful && response.body() != null) {
@@ -49,7 +50,8 @@ class StreamRepository {
         try {
             val response = apiService.getStreams()
             if (response.isSuccessful && response.body() != null) {
-                val streams = response.body()!!
+                val streamResponse = response.body()!!
+                val streams = streamResponse.results
 
                 // Group streams by category
                 val categories = streams
@@ -67,4 +69,5 @@ class StreamRepository {
             Result.failure(e)
         }
     }
+
 }

@@ -5,6 +5,14 @@ import com.google.gson.annotations.SerializedName
 /**
  * Data model representing a stream/video content
  */
+
+data class StreamResponse(
+    val count: Int,
+    val next: String?,
+    val previous: String?,
+    val results: List<Stream>
+)
+
 data class Stream(
     @SerializedName("id")
     val id: Int,
