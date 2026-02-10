@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 object RetrofitClient {
 
     // TODO: Replace with your actual backend API URL
-    private const val BASE_URL = "https://your-backend-api.com/"
+    private const val BASE_URL = "http://192.168.100.12:8000/"
 
     // Logging interceptor for debugging
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
