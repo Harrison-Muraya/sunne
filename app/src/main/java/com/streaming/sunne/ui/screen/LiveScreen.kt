@@ -137,7 +137,7 @@ private fun ChannelListPanel(
                 }
                 Column {
                     Text(
-                        "SUNE",
+                        "SUNNE",
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Black,
                         color = NetflixRed,
