@@ -80,6 +80,8 @@ dependencies {
 
     // Material Design
     implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.compose.material:material-icons-extended:1.6.0")
+
 
     // Kodein Dependency Injection
     implementation("org.kodein.di:kodein-di-framework-android-x:7.21.2")

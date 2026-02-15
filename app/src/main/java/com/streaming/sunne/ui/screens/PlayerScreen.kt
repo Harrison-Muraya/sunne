@@ -1,4 +1,4 @@
-package com.streaming.sunne.ui.screen
+package com.streaming.sunne.ui.screens
 
 import android.view.ViewGroup
 import android.widget.FrameLayout

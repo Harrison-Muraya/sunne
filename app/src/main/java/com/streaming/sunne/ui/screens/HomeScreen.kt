@@ -1,6 +1,4 @@
-@file:JvmName("HomeScreenKt")
-
-package com.streaming.sunne.ui.screen
+package com.streaming.sunne.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -22,23 +20,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil.compose.AsyncImage
-import com.streaming.sunne.data.model.Stream
-import com.streaming.sunne.data.model.StreamCategory
+import com.streaming.sunne.data.model.MovieCategory
+import com.streaming.sunne.data.model.MovieResponse
 import com.streaming.sunne.ui.theme.*
-import com.streaming.sunne.viewmodel.StreamUiState
-import com.streaming.sunne.viewmodel.StreamViewModel
+import com.streaming.sunne.viewmodel.HomeUiState
+import com.streaming.sunne.viewmodel.MovieViewModel
 
-// ─── Navigation items ──────────────────────────────────────────────────────────
 private val navItems = listOf("Home", "TV Shows", "Movies", "My List", "Live")
 
 // ─── HomeScreen ────────────────────────────────────────────────────────────────
 @Composable
 fun HomeScreen(
-    viewModel: StreamViewModel,
-    onStreamClick: (Stream) -> Unit,
+    viewModel: MovieViewModel,
+    onMovieClick: (MovieResponse) -> Unit,
     onLiveClick: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val homeState by viewModel.homeState.collectAsState()
     var selectedNav by remember { mutableStateOf("Home") }
 
     Box(
@@ -46,43 +43,38 @@ fun HomeScreen(
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        when (uiState) {
-            is StreamUiState.Loading -> FullScreenLoader()
-            is StreamUiState.Error  -> ErrorContent(
-                message = (uiState as StreamUiState.Error).message,
+        when (val state = homeState) {
+            is HomeUiState.Loading -> FullScreenLoader()
+            is HomeUiState.Error   -> ErrorContent(
+                message = state.message,
                 onRetry = viewModel::retry
             )
-            is StreamUiState.Success -> {
-                val categories = (uiState as StreamUiState.Success).categories
-                val featuredStream = categories.firstOrNull()?.streams?.firstOrNull()
+            is HomeUiState.Success -> {
+                val categories    = state.categories
+                val featuredMovie = categories.firstOrNull()?.movies?.firstOrNull()
 
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                 ) {
-                    // Hero banner (first featured stream)
-                    if (featuredStream != null) {
+                    if (featuredMovie != null) {
                         HeroBanner(
-                            stream = featuredStream,
-                            navItems = navItems,
+                            movie       = featuredMovie,
+                            navItems    = navItems,
                             selectedNav = selectedNav,
                             onNavSelected = { item ->
                                 selectedNav = item
                                 if (item == "Live") onLiveClick()
                             },
-                            onPlayClick = { onStreamClick(featuredStream) }
+                            onPlayClick = { onMovieClick(featuredMovie) }
                         )
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // Content carousels
                     categories.forEach { category ->
-                        ContentRow(
-                            category = category,
-                            onStreamClick = onStreamClick
-                        )
+                        ContentRow(category = category, onMovieClick = onMovieClick)
                         Spacer(modifier = Modifier.height(32.dp))
                     }
 
@@ -96,7 +88,7 @@ fun HomeScreen(
 // ─── Hero Banner ───────────────────────────────────────────────────────────────
 @Composable
 private fun HeroBanner(
-    stream: Stream,
+    movie: MovieResponse,
     navItems: List<String>,
     selectedNav: String,
     onNavSelected: (String) -> Unit,
@@ -107,15 +99,14 @@ private fun HeroBanner(
             .fillMaxWidth()
             .height(560.dp)
     ) {
-        // Background banner image
         AsyncImage(
-            model = stream.banner ?: stream.thumbnail,
+            model             = movie.bannerUrl,
             contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
+            modifier          = Modifier.fillMaxSize(),
+            contentScale      = ContentScale.Crop
         )
 
-        // Dark vignette overlay - left and bottom
+        // Left + bottom gradient overlays
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -134,20 +125,15 @@ private fun HeroBanner(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            DarkBackground.copy(alpha = 0.3f),
-                            DarkBackground
-                        ),
-                        startY = 200f
+                        colors  = listOf(Color.Transparent, DarkBackground.copy(alpha = 0.3f), DarkBackground),
+                        startY  = 200f
                     )
                 )
         )
 
-        // Top navigation bar
         TopNavBar(
-            navItems = navItems,
-            selectedNav = selectedNav,
+            navItems      = navItems,
+            selectedNav   = selectedNav,
             onNavSelected = onNavSelected
         )
 
@@ -158,86 +144,80 @@ private fun HeroBanner(
                 .padding(start = 56.dp, top = 80.dp)
                 .widthIn(max = 500.dp)
         ) {
-            // Welcome tag
             Text(
-                text = "✦  FEATURED",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = NetflixRed,
+                text          = "✦  FEATURED",
+                fontSize      = 13.sp,
+                fontWeight    = FontWeight.Bold,
+                color         = NetflixRed,
                 letterSpacing = 3.sp
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Title
             Text(
-                text = stream.title,
-                fontSize = 52.sp,
+                text       = movie.title,
+                fontSize   = 52.sp,
                 fontWeight = FontWeight.Black,
-                color = White,
+                color      = White,
                 lineHeight = 56.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                maxLines   = 2,
+                overflow   = TextOverflow.Ellipsis
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Meta info row
+            // Meta row
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment   = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                stream.rating?.let {
+                movie.releaseYear?.let {
+                    Text("$it", fontSize = 14.sp, color = LightGray)
+                    MetaDivider()
+                }
+                movie.formattedDuration()?.let {
+                    Text(it, fontSize = 14.sp, color = LightGray)
+                    MetaDivider()
+                }
+                movie.rating?.let {
+                    QualityBadge(it)          // e.g. "PG-13"
+                }
+                if (movie.genreNames().isNotEmpty()) {
+                    MetaDivider()
                     Text(
-                        text = "★ $it",
-                        fontSize = 14.sp,
-                        color = Color(0xFFFFD700),
-                        fontWeight = FontWeight.Bold
+                        text     = movie.genreNames(),
+                        fontSize = 13.sp,
+                        color    = LightGray.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    MetaDivider()
                 }
-                stream.release_year?.let {
-                    Text(text = "$it", fontSize = 14.sp, color = LightGray)
-                    MetaDivider()
-                }
-                Text(
-                    text = stream.duration ?: "HD",
-                    fontSize = 14.sp,
-                    color = LightGray
-                )
-                MetaDivider()
-                QualityBadge(stream.quality ?: "HD")
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Description
-            stream.description?.let {
+            movie.description?.let {
                 Text(
-                    text = it,
-                    fontSize = 15.sp,
-                    color = White.copy(alpha = 0.8f),
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
+                    text       = it,
+                    fontSize   = 15.sp,
+                    color      = White.copy(alpha = 0.8f),
+                    maxLines   = 3,
+                    overflow   = TextOverflow.Ellipsis,
                     lineHeight = 22.sp
                 )
             }
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Action buttons
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                // Play button
                 PlayButton(onClick = onPlayClick)
-
-                // More Info button
                 MoreInfoButton()
             }
         }
     }
 }
 
-// ─── Top Navigation Bar ────────────────────────────────────────────────────────
+// ─── Top Nav Bar ───────────────────────────────────────────────────────────────
 @Composable
 private fun TopNavBar(
     navItems: List<String>,
@@ -245,54 +225,47 @@ private fun TopNavBar(
     onNavSelected: (String) -> Unit
 ) {
     Row(
-        modifier = Modifier
+        modifier            = Modifier
             .fillMaxWidth()
             .padding(horizontal = 56.dp, vertical = 28.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment   = Alignment.CenterVertically
     ) {
-        // Logo
         Text(
-            text = "SUNE",
-            fontSize = 36.sp,
-            fontWeight = FontWeight.Black,
-            color = NetflixRed,
+            text          = "SUNE",
+            fontSize      = 36.sp,
+            fontWeight    = FontWeight.Black,
+            color         = NetflixRed,
             letterSpacing = 4.sp
         )
 
         Spacer(modifier = Modifier.width(56.dp))
 
-        // Nav items
         Row(
             horizontalArrangement = Arrangement.spacedBy(36.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment     = Alignment.CenterVertically
         ) {
             navItems.forEach { item ->
                 NavItem(
-                    label = item,
+                    label      = item,
                     isSelected = item == selectedNav,
-                    isLive = item == "Live",
-                    onClick = { onNavSelected(item) }
+                    isLive     = item == "Live",
+                    onClick    = { onNavSelected(item) }
                 )
             }
         }
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Right icons
         Row(
             horizontalArrangement = Arrangement.spacedBy(20.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment     = Alignment.CenterVertically
         ) {
             Icon(Icons.Default.Search, contentDescription = "Search",
                 tint = White, modifier = Modifier.size(24.dp).clickable {})
             Icon(Icons.Default.Notifications, contentDescription = "Notifications",
                 tint = White, modifier = Modifier.size(24.dp).clickable {})
-            // Profile avatar
             Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(NetflixRed),
+                modifier        = Modifier.size(36.dp).clip(CircleShape).background(NetflixRed),
                 contentAlignment = Alignment.Center
             ) {
                 Text("A", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = White)
@@ -309,42 +282,27 @@ private fun NavItem(
     isLive: Boolean = false,
     onClick: () -> Unit
 ) {
-    var isFocused by remember { mutableStateOf(false) }
-
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onClick() }
+        modifier            = Modifier.clickable { onClick() }
     ) {
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (isLive) {
-                // Live indicator dot
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(NetflixRed)
-                )
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(NetflixRed))
             }
             Text(
-                text = label,
-                fontSize = 16.sp,
+                text       = label,
+                fontSize   = 16.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isSelected) White else White.copy(alpha = 0.7f)
+                color      = if (isSelected) White else White.copy(alpha = 0.7f)
             )
         }
-
-        // Selected underline
         if (isSelected) {
             Spacer(modifier = Modifier.height(4.dp))
-            Box(
-                modifier = Modifier
-                    .width(20.dp)
-                    .height(2.dp)
-                    .background(NetflixRed, RoundedCornerShape(1.dp))
-            )
+            Box(modifier = Modifier.width(20.dp).height(2.dp).background(NetflixRed, RoundedCornerShape(1.dp)))
         }
     }
 }
@@ -353,29 +311,20 @@ private fun NavItem(
 @Composable
 private fun PlayButton(onClick: () -> Unit) {
     var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.06f else 1f,
-        animationSpec = tween(150)
-    )
+    val scale by animateFloatAsState(if (isFocused) 1.06f else 1f, tween(150))
     Row(
         modifier = Modifier
             .scale(scale)
             .clip(RoundedCornerShape(6.dp))
             .background(White)
             .clickable { onClick() }
-            .padding(horizontal = 28.dp, vertical = 13.dp)
-            .onFocusChanged { isFocused = it.isFocused },
-        verticalAlignment = Alignment.CenterVertically,
+            .onFocusChanged { isFocused = it.isFocused }
+            .padding(horizontal = 28.dp, vertical = 13.dp),
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(Icons.Default.PlayArrow, contentDescription = null,
-            tint = DarkBackground, modifier = Modifier.size(26.dp))
-        Text(
-            text = "Play",
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            color = DarkBackground
-        )
+        Icon(Icons.Default.PlayArrow, null, tint = DarkBackground, modifier = Modifier.size(26.dp))
+        Text("Play", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = DarkBackground)
     }
 }
 
@@ -388,71 +337,52 @@ private fun MoreInfoButton() {
             .background(White.copy(alpha = 0.25f))
             .clickable { }
             .padding(horizontal = 24.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(Icons.Default.Info, contentDescription = null,
-            tint = White, modifier = Modifier.size(22.dp))
-        Text(
-            text = "More Info",
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = White
-        )
+        Icon(Icons.Default.Info, null, tint = White, modifier = Modifier.size(22.dp))
+        Text("More Info", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = White)
     }
 }
 
 // ─── Content Row (Carousel) ────────────────────────────────────────────────────
 @Composable
 fun ContentRow(
-    category: StreamCategory,
-    onStreamClick: (Stream) -> Unit
+    category: MovieCategory,
+    onMovieClick: (MovieResponse) -> Unit
 ) {
     Column {
-        // Section header
         Row(
-            modifier = Modifier
-                .padding(horizontal = 56.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier              = Modifier.padding(horizontal = 56.dp).fillMaxWidth(),
+            verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = category.category,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = White
-            )
-            Text(
-                text = "See all ›",
-                fontSize = 14.sp,
-                color = NetflixRed,
-                modifier = Modifier.clickable { }
-            )
+            Text(category.label, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = White)
+            Text("See all ›", fontSize = 14.sp, color = NetflixRed, modifier = Modifier.clickable { })
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 56.dp),
+            contentPadding        = PaddingValues(horizontal = 56.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(category.streams) { stream ->
-                StreamCard(stream = stream, onClick = { onStreamClick(stream) })
+            items(category.movies) { movie ->
+                MovieCard(movie = movie, onClick = { onMovieClick(movie) })
             }
         }
     }
 }
 
-// ─── Stream Card ───────────────────────────────────────────────────────────────
+// ─── Movie Card ────────────────────────────────────────────────────────────────
 @Composable
-private fun StreamCard(
-    stream: Stream,
+private fun MovieCard(
+    movie: MovieResponse,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.1f else 1f,
+        targetValue  = if (isFocused) 1.1f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
     )
 
@@ -464,19 +394,16 @@ private fun StreamCard(
             .clickable { onClick() }
             .onFocusChanged { isFocused = it.isFocused }
             .border(
-                width = if (isFocused) 2.5.dp else 0.dp,
-                color = if (isFocused) NetflixRed else Color.Transparent,
-                shape = RoundedCornerShape(8.dp)
+                width  = if (isFocused) 2.5.dp else 0.dp,
+                color  = if (isFocused) NetflixRed else Color.Transparent,
+                shape  = RoundedCornerShape(8.dp)
             )
     ) {
-        // Thumbnail
         AsyncImage(
-            model = stream.thumbnail,
-            contentDescription = stream.title,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(130.dp),
-            contentScale = ContentScale.Crop
+            model              = movie.thumbnailUrl,
+            contentDescription = movie.title,
+            modifier           = Modifier.fillMaxWidth().height(130.dp),
+            contentScale       = ContentScale.Crop
         )
 
         // Bottom gradient
@@ -485,14 +412,12 @@ private fun StreamCard(
                 .fillMaxWidth()
                 .height(130.dp)
                 .align(Alignment.TopStart)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, DarkBackground.copy(alpha = 0.7f))
-                    )
-                )
+                .background(Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, DarkBackground.copy(alpha = 0.7f))
+                ))
         )
 
-        // Title at bottom
+        // Info bar
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -501,63 +426,52 @@ private fun StreamCard(
                 .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
             Text(
-                text = stream.title,
-                fontSize = 13.sp,
+                text      = movie.title,
+                fontSize  = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                color     = White,
+                maxLines  = 1,
+                overflow  = TextOverflow.Ellipsis
             )
-            stream.duration?.let {
-                Text(
-                    text = it,
-                    fontSize = 11.sp,
-                    color = LightGray
-                )
+            movie.formattedDuration()?.let {
+                Text(it, fontSize = 11.sp, color = LightGray)
             }
         }
 
-        // Live badge
-        if (stream.is_live == true) {
+        // Trending badge
+        if (movie.isTrending) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(8.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(NetflixRed)
+                    .background(Color(0xFFFF6B00))
                     .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
-                Text("LIVE", fontSize = 10.sp, fontWeight = FontWeight.Black, color = White)
+                Text("TRENDING", fontSize = 9.sp, fontWeight = FontWeight.Black, color = White)
             }
         }
     }
 }
 
-// ─── Quality Badge ─────────────────────────────────────────────────────────────
+// ─── Shared helpers ────────────────────────────────────────────────────────────
 @Composable
-private fun QualityBadge(quality: String) {
+private fun QualityBadge(label: String) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(3.dp))
             .border(1.dp, LightGray.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
             .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
-        Text(quality, fontSize = 11.sp, color = LightGray, fontWeight = FontWeight.Bold)
+        Text(label, fontSize = 11.sp, color = LightGray, fontWeight = FontWeight.Bold)
     }
 }
 
-// ─── Meta Divider ──────────────────────────────────────────────────────────────
 @Composable
 private fun MetaDivider() {
-    Box(
-        modifier = Modifier
-            .size(4.dp)
-            .clip(CircleShape)
-            .background(LightGray.copy(alpha = 0.5f))
-    )
+    Box(modifier = Modifier.size(4.dp).clip(CircleShape).background(LightGray.copy(alpha = 0.5f)))
 }
 
-// ─── Full Screen Loader ────────────────────────────────────────────────────────
 @Composable
 private fun FullScreenLoader() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -569,7 +483,6 @@ private fun FullScreenLoader() {
     }
 }
 
-// ─── Error Content ─────────────────────────────────────────────────────────────
 @Composable
 private fun ErrorContent(message: String, onRetry: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -82,7 +82,7 @@ object RetrofitClient {
     // Android emulator  → "http://10.0.2.2:8000/"
     // Physical device   → "http://192.168.1.XXX:8000/"
     // Production        → "https://api.sunetv.com/"
-    const val BASE_URL = "http://10.0.2.2:8000/"
+    const val BASE_URL = "http://192.168.100.8:8000/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY
@@ -110,45 +110,3 @@ object RetrofitClient {
         retrofit.create(ApiService::class.java)
     }
 }
-
-//import okhttp3.OkHttpClient
-//import okhttp3.logging.HttpLoggingInterceptor
-//import retrofit2.Retrofit
-//import retrofit2.converter.gson.GsonConverterFactory
-//import java.util.concurrent.TimeUnit
-//
-///**
-// * Retrofit client singleton
-// * Handles network configuration and API service creation
-// */
-//object RetrofitClient {
-//
-//    // TODO: Replace with your actual backend API URL
-//    private const val BASE_URL = "http://192.168.100.14:8000/"
-//
-//    // Logging interceptor for debugging
-//    private val loggingInterceptor = HttpLoggingInterceptor().apply {
-//        level = HttpLoggingInterceptor.Level.BODY
-//    }
-//
-//    // OkHttp client with timeout and logging
-//    private val okHttpClient = OkHttpClient.Builder()
-//        .addInterceptor(loggingInterceptor)
-//        .connectTimeout(30, TimeUnit.SECONDS)
-//        .readTimeout(30, TimeUnit.SECONDS)
-//        .writeTimeout(30, TimeUnit.SECONDS)
-//        .build()
-//
-//    // Retrofit instance
-//    private val retrofit: Retrofit by lazy {
-//        Retrofit.Builder()
-//            .baseUrl(BASE_URL)
-//            .client(okHttpClient)
-//            .addConverterFactory(GsonConverterFactory.create())
-//            .build()
-//    }
-//    // API Service instance
-//    val apiService: ApiService by lazy {
-//        retrofit.create(ApiService::class.java)
-//    }
-//}

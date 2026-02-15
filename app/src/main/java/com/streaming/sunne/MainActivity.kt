@@ -14,7 +14,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import com.streaming.sunne.data.network.TokenManager
-import com.streaming.sunne.ui.screen.*
+import com.streaming.sunne.ui.screens.*
 import com.streaming.sunne.ui.theme.DarkBackground
 import com.streaming.sunne.ui.theme.SunneTheme
 import com.streaming.sunne.viewmodel.AuthViewModel
@@ -105,7 +105,7 @@ fun SuneApp() {
         composable(Screen.Home.route) {
             HomeScreen(
                 viewModel = movieViewModel,
-                onStreamClick = { movie ->
+                onMovieClick = { movie ->
                     movieViewModel.selectMovie(movie)
                     navController.navigate(Screen.Details.route)
                 },
@@ -132,7 +132,7 @@ fun SuneApp() {
             val movie = movieViewModel.selectedMovie.value
             if (movie != null) {
                 DetailsScreen(
-                    stream = movie.toStream(),           // adapter below
+                    movie = movie,
                     onPlayClick = {
                         navController.navigate(Screen.Player.route)
                     },
@@ -166,31 +166,6 @@ sealed class Screen(val route: String) {
     object Details  : Screen("details")
     object Player   : Screen("player")
 }
-
-// ─── Adapter: MovieResponse → legacy Stream model ──────────────────────────────
-// The redesigned screens (HomeScreen, LiveScreen, DetailsScreen) still accept
-// the old Stream type. This extension converts MovieResponse so both work.
-
-fun com.streaming.sunne.data.model.MovieResponse.toStream() =
-    com.streaming.sunne.data.model.Stream(
-        id          = id,
-        title       = title,
-        thumbnail   = posterUrl ?: backdropUrl ?: "",
-        url         = videoUrl  ?: "",
-        category    = genres.firstOrNull()?.name ?: "Movies",
-        description = description,
-        banner      = backdropUrl ?: posterUrl,
-        duration    = formattedDuration(),
-        rating      = null,               // API rating is a String ("PG-13") not numeric
-        release_year = releaseYear,
-        director    = director,
-        cast        = cast,
-        language    = language,
-        quality     = videoFiles.firstOrNull()?.quality ?: "HD",
-        is_featured = isFeatured,
-        is_live     = false,
-        view_count  = viewCount
-    )
 
 
 //import android.os.Bundle
