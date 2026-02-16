@@ -478,7 +478,7 @@ private fun FullScreenLoader() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = NetflixRed, modifier = Modifier.size(56.dp))
             Spacer(Modifier.height(16.dp))
-            Text("Loading Sune...", fontSize = 18.sp, color = LightGray)
+            Text("Loading Sunne...", fontSize = 18.sp, color = LightGray)
         }
     }
 }

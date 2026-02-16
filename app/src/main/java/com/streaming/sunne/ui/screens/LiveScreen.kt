@@ -106,7 +106,7 @@ private fun ChannelListPanel(
                     Icon(Icons.Default.ArrowBack, "Back", tint = White, modifier = Modifier.size(20.dp))
                 }
                 Column {
-                    Text("SUNE", fontSize = 22.sp, fontWeight = FontWeight.Black,
+                    Text("SUNNE", fontSize = 22.sp, fontWeight = FontWeight.Black,
                         color = NetflixRed, letterSpacing = 3.sp)
                     Text("Live TV", fontSize = 13.sp, color = LightGray)
                 }

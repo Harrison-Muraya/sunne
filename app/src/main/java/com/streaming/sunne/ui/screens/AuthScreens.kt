@@ -192,7 +192,7 @@ fun LoginScreen(
 
             // Register link
             Row {
-                Text("New to SuNne? ", fontSize = 14.sp, color = LightGray)
+                Text("New to Sunne? ", fontSize = 14.sp, color = LightGray)
                 Text(
                     "Sign up now",
                     fontSize = 14.sp,
@@ -238,7 +238,7 @@ fun RegisterScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("SUNE", fontSize = 48.sp, fontWeight = FontWeight.Black,
+            Text("SUNNE", fontSize = 48.sp, fontWeight = FontWeight.Black,
                 color = NetflixRed, letterSpacing = 8.sp)
             Text("Create your account", fontSize = 16.sp, color = LightGray)
 
