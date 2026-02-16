@@ -82,7 +82,7 @@ object RetrofitClient {
     // Android emulator  → "http://10.0.2.2:8000/"
     // Physical device   → "http://192.168.1.XXX:8000/"
     // Production        → "https://api.sunetv.com/"
-    const val BASE_URL = "http://192.168.100.8:8000/"
+    const val BASE_URL = "http://192.168.100.54/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

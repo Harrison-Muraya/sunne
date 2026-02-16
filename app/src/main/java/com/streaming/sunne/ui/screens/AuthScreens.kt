@@ -77,7 +77,7 @@ fun LoginScreen(
         ) {
             // Logo
             Text(
-                "SUNE",
+                "SUNNE",
                 fontSize = 52.sp,
                 fontWeight = FontWeight.Black,
                 color = NetflixRed,
@@ -192,7 +192,7 @@ fun LoginScreen(
 
             // Register link
             Row {
-                Text("New to Sune? ", fontSize = 14.sp, color = LightGray)
+                Text("New to SuNne? ", fontSize = 14.sp, color = LightGray)
                 Text(
                     "Sign up now",
                     fontSize = 14.sp,

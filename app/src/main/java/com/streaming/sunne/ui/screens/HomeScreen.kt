@@ -231,7 +231,7 @@ private fun TopNavBar(
         verticalAlignment   = Alignment.CenterVertically
     ) {
         Text(
-            text          = "SUNE",
+            text          = "SUNNE",
             fontSize      = 36.sp,
             fontWeight    = FontWeight.Black,
             color         = NetflixRed,
