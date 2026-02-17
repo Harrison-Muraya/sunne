@@ -323,7 +323,7 @@ private fun LiveChannelPanel(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 BackBtn(onBackClick)
                 Column {
-                    Text("SUNE", fontSize = sp(20), fontWeight = FontWeight.Black, color = NetflixRed, letterSpacing = sp(3))
+                    Text("SUNNE", fontSize = sp(20), fontWeight = FontWeight.Black, color = NetflixRed, letterSpacing = sp(3))
                     Text("Live TV", fontSize = sp(12), color = LightGray)
                 }
             }

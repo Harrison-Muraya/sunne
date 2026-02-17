@@ -167,7 +167,7 @@ private fun TvTopBar(
     ) {
         // Logo
         Text(
-            "SUNE",
+            "SUNNE",
             fontSize      = adaptive.logo,
             fontWeight    = FontWeight.Black,
             color         = NetflixRed,
@@ -348,7 +348,7 @@ private fun HeroBanner(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                Text("SUNE", fontSize = adaptive.logo, fontWeight = FontWeight.Black,
+                Text("SUNNE", fontSize = adaptive.logo, fontWeight = FontWeight.Black,
                     color = NetflixRed, letterSpacing = sp(4))
                 Avatar(
                     letter  = username.firstOrNull()?.uppercaseChar()?.toString() ?: "A",
@@ -700,7 +700,7 @@ private fun HomeLoadingScreen() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = NetflixRed, modifier = Modifier.size(50.dp))
             Spacer(Modifier.height(14.dp))
-            Text("Loading Sune...", fontSize = sp(16), color = LightGray)
+            Text("Loading Sunne...", fontSize = sp(16), color = LightGray)
         }
     }
 }
