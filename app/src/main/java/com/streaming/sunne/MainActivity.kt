@@ -19,6 +19,8 @@ import com.streaming.sunne.ui.theme.DarkBackground
 import com.streaming.sunne.ui.theme.SunneTheme
 import com.streaming.sunne.viewmodel.AuthViewModel
 import com.streaming.sunne.viewmodel.MovieViewModel
+import com.streaming.sunne.viewmodel.LiveStreamViewModel
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -134,10 +136,65 @@ fun SuneApp() {
                 )
             }
         }
+        composable(Screen.SeriesDetail.route) {
+            val series = movieViewModel.selectedSeries.value
+            if (series != null) {
+                SeriesDetailScreen(
+                    series = series,
+                    onEpisodeClick = { episode ->
+                        movieViewModel.selectEpisode(episode)
+                        navController.navigate(Screen.EpisodePlayer.route)
+                    },
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
+        }
+
+        composable(Screen.EpisodePlayer.route) {
+            val episode = movieViewModel.selectedEpisode.value
+            if (episode != null) {
+                EpisodePlayerScreen(
+                    episode = episode,
+                    viewModel = movieViewModel,
+                    onBackPress = { navController.popBackStack() },
+                    onAutoPlayNext = { nextEpisode ->
+                        movieViewModel.selectEpisode(nextEpisode)
+                        // Stay on same screen, player reloads
+                    }
+                )
+            }
+        }
+
+        composable(Screen.LiveStreamList.route) {
+            val liveViewModel: LiveStreamViewModel = viewModel()
+            LiveStreamListScreen(
+                viewModel = liveViewModel,
+                onStreamClick = { stream ->
+                    movieViewModel.selectLiveStream(stream)
+                    navController.navigate(Screen.LivePlayer.route)
+                },
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.LivePlayer.route) {
+            val stream = movieViewModel.selectedLiveStream.value
+            if (stream != null) {
+                LivePlayerScreen(
+                    stream = stream,
+                    viewModel = LiveStreamViewModel(),
+                    onBackPress = { navController.popBackStack() }
+                )
+            }
+        }
     }
 }
 
 sealed class Screen(val route: String) {
+    object SeriesDetail : Screen("series-detail")
+    object EpisodePlayer : Screen("episode-player")
+    object LiveStreamList : Screen("live-stream-list")
+    object LivePlayer : Screen("live-player")
     object Splash   : Screen("splash")
     object Login    : Screen("login")
     object Register : Screen("register")
