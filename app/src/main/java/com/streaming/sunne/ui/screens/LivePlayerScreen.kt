@@ -3,9 +3,11 @@ package com.streaming.sunne.ui.screens
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -86,54 +88,112 @@ fun LivePlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Live indicator overlay (top-left)
+        // ── Top overlay row ───────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(20.dp)
-                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Pulsing dot
-            val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "dot")
-            val alpha by inf.animateFloat(
-                0.5f, 1f,
-                androidx.compose.animation.core.infiniteRepeatable(
-                    androidx.compose.animation.core.tween(700),
-                    androidx.compose.animation.core.RepeatMode.Reverse
-                ),
-                "a"
-            )
-            Box(
-                Modifier.size(8.dp)
-                    .background(NetflixRed.copy(alpha), androidx.compose.foundation.shape.CircleShape)
-            )
-            Text("LIVE", fontSize = sp(12),
-                fontWeight = FontWeight.Black, color = White)
+            // Left: Back button + LIVE badge
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Back button
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            Color.Black.copy(alpha = 0.6f),
+                            androidx.compose.foundation.shape.CircleShape
+                        )
+                        .clickable { onBackPress() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Back",
+                        tint = White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Pulsing LIVE badge
+                val inf = rememberInfiniteTransition(label = "dot")
+                val pulseAlpha by inf.animateFloat(
+                    initialValue = 0.5f,
+                    targetValue  = 1f,
+                    animationSpec = infiniteRepeatable(
+                        tween(700),
+                        RepeatMode.Reverse
+                    ),
+                    label = "alpha"
+                )
+                Row(
+                    modifier = Modifier
+                        .background(
+                            Color.Black.copy(0.7f),
+                            androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .background(
+                                NetflixRed.copy(alpha = pulseAlpha),
+                                androidx.compose.foundation.shape.CircleShape
+                            )
+                    )
+                    Text("LIVE", fontSize = sp(12), fontWeight = FontWeight.Black, color = White)
+                }
+            }
+
+            // Right: Viewer count
+            Row(
+                modifier = Modifier
+                    .background(
+                        Color.Black.copy(0.7f),
+                        androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
+                Text(stream.formattedViewerCount(), fontSize = sp(12), color = White)
+            }
         }
 
-        // Viewer count (top-right)
-        Row(
+        // ── Stream title at bottom ────────────────────────────────────────────
+        Column(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(20.dp)
-                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(0.8f))
+                    )
+                )
+                .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
-            Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
             Text(
-                stream.formattedViewerCount(),
-                fontSize = sp(12),
-                color = White
+                stream.title,
+                fontSize   = sp(18),
+                fontWeight = FontWeight.Bold,
+                color      = White
             )
+            stream.description?.let {
+                Text(it, fontSize = sp(13), color = White.copy(0.7f), maxLines = 2)
+            }
         }
     }
 }
 
 private fun sp(value: Float) = androidx.compose.ui.unit.TextUnit(value, androidx.compose.ui.unit.TextUnitType.Sp)
 private fun sp(value: Int) = sp(value.toFloat())
-

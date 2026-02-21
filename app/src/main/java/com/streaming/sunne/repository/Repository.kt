@@ -417,38 +417,69 @@ class HomeContentRepository {
                 }
             }
 
+
             // Featured Movies
+            val featuredMovieIds = mutableSetOf<Int>()
             movieRepo.getFeaturedMovies(10).getOrNull()?.let { movies ->
                 if (movies.isNotEmpty()) {
+                    featuredMovieIds += movies.map { it.id }
                     rows.add(ContentRow("Featured Movies", movies.map { ContentItem.Movie(it) }))
                 }
             }
 
             // Featured Series
+            val featuredSeriesIds = mutableSetOf<Int>()
             seriesRepo.getFeaturedSeries(10).getOrNull()?.let { series ->
                 if (series.isNotEmpty()) {
+                    featuredSeriesIds += series.map { it.id }
                     rows.add(ContentRow("Featured Series", series.map { ContentItem.Series(it) }))
                 }
             }
 
             // Trending Movies
+            val trendingMovieIds = mutableSetOf<Int>()
             movieRepo.getTrendingMovies(10).getOrNull()?.let { movies ->
                 if (movies.isNotEmpty()) {
+                    trendingMovieIds += movies.map { it.id }
                     rows.add(ContentRow("Trending Now", movies.map { ContentItem.Movie(it) }))
                 }
             }
 
             // Trending Series
+            val trendingSeriesIds = mutableSetOf<Int>()
             seriesRepo.getTrendingSeries(10).getOrNull()?.let { series ->
                 if (series.isNotEmpty()) {
+                    trendingSeriesIds += series.map { it.id }
                     rows.add(ContentRow("Trending Series", series.map { ContentItem.Series(it) }))
                 }
             }
 
-            // Recently Added
+            // Recently Added Movies
+            val recentMovieIds = mutableSetOf<Int>()
             movieRepo.getRecentMovies(10).getOrNull()?.let { movies ->
                 if (movies.isNotEmpty()) {
+                    recentMovieIds += movies.map { it.id }
                     rows.add(ContentRow("Recently Added", movies.map { ContentItem.Movie(it) }))
+                }
+            }
+
+            // ALL Series — ensures series with is_featured=false & is_trending=false still appear
+            val shownSeriesIds = featuredSeriesIds + trendingSeriesIds
+            seriesRepo.listSeries(pageSize = 50).getOrNull()?.series?.let { allSeries ->
+                val unseen = if (shownSeriesIds.isEmpty()) allSeries
+                else allSeries.filter { it.id !in shownSeriesIds }
+                if (unseen.isNotEmpty()) {
+                    rows.add(ContentRow("TV Shows", unseen.map { ContentItem.Series(it) }))
+                }
+            }
+
+            // ALL Movies — ensures movies with is_featured=false & is_trending=false still appear
+            val shownMovieIds = featuredMovieIds + trendingMovieIds + recentMovieIds
+            movieRepo.getMovies(pageSize = 50).getOrNull()?.movies?.let { allMovies ->
+                val unseen = if (shownMovieIds.isEmpty()) allMovies
+                else allMovies.filter { it.id !in shownMovieIds }
+                if (unseen.isNotEmpty()) {
+                    rows.add(ContentRow("All Movies", unseen.map { ContentItem.Movie(it) }))
                 }
             }
 
@@ -490,4 +521,3 @@ class HomeContentRepository {
         }
     }
 }
-

@@ -179,6 +179,7 @@ data class SeriesResponse(
     @SerializedName("created_at")   val createdAt: String,
     @SerializedName("updated_at")   val updatedAt: String,
     @SerializedName("seasons")      val seasons: List<SeasonResponse> = emptyList()
+
 ) {
     fun formattedSeasonCount(): String {
         val count = seasons.size

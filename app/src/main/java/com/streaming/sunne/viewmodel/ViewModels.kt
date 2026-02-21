@@ -71,6 +71,17 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    fun updateProfile(email: String? = null, fullName: String? = null, password: String? = null) {
+        viewModelScope.launch {
+            repo.updateMe(UserUpdate(email, fullName, password))
+                .onSuccess { user ->
+                    _currentUser.value = user
+                    _authState.value = UiState.Success(user)
+                }
+                .onFailure { _authState.value = UiState.Error(it.message ?: "Update failed") }
+        }
+    }
+
     fun logout() {
         viewModelScope.launch {
             repo.logout()
@@ -78,39 +89,82 @@ class AuthViewModel : ViewModel() {
             _authState.value = UiState.Idle
         }
     }
+
+    fun deleteAccount() {
+        viewModelScope.launch {
+            repo.deleteAccount()
+            _currentUser.value = null
+            _authState.value = UiState.Idle
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  MOVIE VIEW MODEL (+ Series + Live)
+//  MOVIE VIEW MODEL  (movies + series + live selection hub)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class MovieViewModel : ViewModel() {
 
-    private val movieRepo = MovieRepository()
-    private val homeRepo  = HomeContentRepository()
+    private val movieRepo  = MovieRepository()
+    private val homeRepo   = HomeContentRepository()
+    private val watchRepo  = WatchRepository()
+    private val recRepo    = RecommendationRepository()
 
+    // ── Home ──────────────────────────────────────────────────────────────────
     private val _homeState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val homeState: StateFlow<HomeUiState> = _homeState.asStateFlow()
 
+    // ── Stream URL ────────────────────────────────────────────────────────────
     private val _streamUrl = MutableStateFlow<UiState<String>>(UiState.Idle)
     val streamUrl: StateFlow<UiState<String>> = _streamUrl.asStateFlow()
 
-    // Selected content for detail screens
-    private val _selectedMovie = MutableStateFlow<MovieResponse?>(null)
+    // ── Search ────────────────────────────────────────────────────────────────
+    private val _searchQuery   = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searchResults = MutableStateFlow<UiState<List<MovieResponse>>>(UiState.Idle)
+    val searchResults: StateFlow<UiState<List<MovieResponse>>> = _searchResults.asStateFlow()
+
+    // ── Ratings ───────────────────────────────────────────────────────────────
+    private val _myRating      = MutableStateFlow<MovieRatingResponse?>(null)
+    val myRating: StateFlow<MovieRatingResponse?> = _myRating.asStateFlow()
+
+    private val _avgRating     = MutableStateFlow<AverageRatingResponse?>(null)
+    val avgRating: StateFlow<AverageRatingResponse?> = _avgRating.asStateFlow()
+
+    private val _ratingState   = MutableStateFlow<UiState<MovieRatingResponse>>(UiState.Idle)
+    val ratingState: StateFlow<UiState<MovieRatingResponse>> = _ratingState.asStateFlow()
+
+    // ── Recommendations ───────────────────────────────────────────────────────
+    private val _recommendations = MutableStateFlow<UiState<List<RecommendationResponse>>>(UiState.Idle)
+    val recommendations: StateFlow<UiState<List<RecommendationResponse>>> = _recommendations.asStateFlow()
+
+    private val _similarMovies = MutableStateFlow<List<SimilarMovieResponse>>(emptyList())
+    val similarMovies: StateFlow<List<SimilarMovieResponse>> = _similarMovies.asStateFlow()
+
+    private val _becauseYouWatched = MutableStateFlow<List<RecommendationResponse>>(emptyList())
+    val becauseYouWatched: StateFlow<List<RecommendationResponse>> = _becauseYouWatched.asStateFlow()
+
+    // ── Watch History ─────────────────────────────────────────────────────────
+    private val _watchHistory  = MutableStateFlow<UiState<List<WatchHistoryResponse>>>(UiState.Idle)
+    val watchHistory: StateFlow<UiState<List<WatchHistoryResponse>>> = _watchHistory.asStateFlow()
+
+    // ── Selected content ──────────────────────────────────────────────────────
+    private val _selectedMovie      = MutableStateFlow<MovieResponse?>(null)
     val selectedMovie: StateFlow<MovieResponse?> = _selectedMovie.asStateFlow()
 
-    private val _selectedSeries = MutableStateFlow<SeriesResponse?>(null)
+    private val _selectedSeries     = MutableStateFlow<SeriesResponse?>(null)
     val selectedSeries: StateFlow<SeriesResponse?> = _selectedSeries.asStateFlow()
 
-    private val _selectedEpisode = MutableStateFlow<EpisodeResponse?>(null)
+    private val _selectedEpisode    = MutableStateFlow<EpisodeResponse?>(null)
     val selectedEpisode: StateFlow<EpisodeResponse?> = _selectedEpisode.asStateFlow()
 
     private val _selectedLiveStream = MutableStateFlow<LiveStreamPublicResponse?>(null)
     val selectedLiveStream: StateFlow<LiveStreamPublicResponse?> = _selectedLiveStream.asStateFlow()
 
-    init {
-        loadHomeContent()
-    }
+    init { loadHomeContent() }
+
+    // ── Home ──────────────────────────────────────────────────────────────────
 
     fun loadHomeContent() {
         viewModelScope.launch {
@@ -123,21 +177,32 @@ class MovieViewModel : ViewModel() {
 
     fun retry() = loadHomeContent()
 
+    // ── Selection helpers ─────────────────────────────────────────────────────
+
     fun selectMovie(movie: MovieResponse) {
         _selectedMovie.value = movie
+        // Pre-load ancillary data for the detail screen
+        loadSimilarMovies(movie.id)
+        loadBecauseYouWatched(movie.id)
+        loadMyRating(movie.id)
+        loadAverageRating(movie.id)
     }
 
     fun selectSeries(series: SeriesResponse) {
+        // Set immediately so navigation can proceed without blocking
         _selectedSeries.value = series
+        // Fetch full detail in background — includes seasons & episodes
+        // SeriesDetailScreen will recompose automatically when the richer data arrives
+        viewModelScope.launch {
+            SeriesRepository().getSeries(series.id)
+                .onSuccess { fullSeries -> _selectedSeries.value = fullSeries }
+            // On failure the partial series stays — user still sees title/banner
+        }
     }
+    fun selectEpisode(episode: EpisodeResponse) { _selectedEpisode.value = episode }
+    fun selectLiveStream(stream: LiveStreamPublicResponse) { _selectedLiveStream.value = stream }
 
-    fun selectEpisode(episode: EpisodeResponse) {
-        _selectedEpisode.value = episode
-    }
-
-    fun selectLiveStream(stream: LiveStreamPublicResponse) {
-        _selectedLiveStream.value = stream
-    }
+    // ── Stream URL ────────────────────────────────────────────────────────────
 
     fun loadStreamUrl(movieId: Int, quality: String = "1080p") {
         viewModelScope.launch {
@@ -149,8 +214,120 @@ class MovieViewModel : ViewModel() {
     }
 
     fun trackView(movieId: Int) {
+        viewModelScope.launch { movieRepo.incrementViewCount(movieId) }
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────────
+
+    fun search(query: String) {
+        _searchQuery.value = query
+        if (query.isBlank()) {
+            _searchResults.value = UiState.Idle
+            return
+        }
         viewModelScope.launch {
-            movieRepo.incrementViewCount(movieId)
+            _searchResults.value = UiState.Loading
+            movieRepo.getMovies(search = query, pageSize = 50)
+                .onSuccess { _searchResults.value = UiState.Success(it.movies) }
+                .onFailure { _searchResults.value = UiState.Error(it.message ?: "Search failed") }
+        }
+    }
+
+    fun clearSearch() {
+        _searchQuery.value = ""
+        _searchResults.value = UiState.Idle
+    }
+
+    // ── Ratings ───────────────────────────────────────────────────────────────
+
+    fun loadMyRating(movieId: Int) {
+        viewModelScope.launch {
+            watchRepo.getMyRating(movieId)
+                .onSuccess { _myRating.value = it }
+        }
+    }
+
+    fun loadAverageRating(movieId: Int) {
+        viewModelScope.launch {
+            watchRepo.getAverageRating(movieId)
+                .onSuccess { _avgRating.value = it }
+        }
+    }
+
+    fun rateMovie(movieId: Int, rating: Int, review: String? = null) {
+        viewModelScope.launch {
+            _ratingState.value = UiState.Loading
+            watchRepo.rateMovie(movieId, rating, review)
+                .onSuccess {
+                    _myRating.value = it
+                    _ratingState.value = UiState.Success(it)
+                    loadAverageRating(movieId)
+                }
+                .onFailure { _ratingState.value = UiState.Error(it.message ?: "Rating failed") }
+        }
+    }
+
+    fun deleteMyRating(movieId: Int) {
+        viewModelScope.launch {
+            watchRepo.deleteMyRating(movieId)
+                .onSuccess {
+                    _myRating.value = null
+                    _ratingState.value = UiState.Idle
+                    loadAverageRating(movieId)
+                }
+        }
+    }
+
+    // ── Recommendations ───────────────────────────────────────────────────────
+
+    fun loadRecommendations(strategy: String = "auto") {
+        viewModelScope.launch {
+            _recommendations.value = UiState.Loading
+            recRepo.getForYou(limit = 20, strategy = strategy)
+                .onSuccess { _recommendations.value = UiState.Success(it) }
+                .onFailure { _recommendations.value = UiState.Error(it.message ?: "Failed") }
+        }
+    }
+
+    fun loadSimilarMovies(movieId: Int) {
+        viewModelScope.launch {
+            recRepo.getSimilar(movieId)
+                .onSuccess { _similarMovies.value = it }
+        }
+    }
+
+    fun loadBecauseYouWatched(movieId: Int) {
+        viewModelScope.launch {
+            recRepo.getBecauseYouWatched(movieId)
+                .onSuccess { _becauseYouWatched.value = it }
+        }
+    }
+
+    // ── Watch History ─────────────────────────────────────────────────────────
+
+    fun loadWatchHistory(completedOnly: Boolean = false) {
+        viewModelScope.launch {
+            _watchHistory.value = UiState.Loading
+            watchRepo.getHistory(completedOnly)
+                .onSuccess { _watchHistory.value = UiState.Success(it) }
+                .onFailure { _watchHistory.value = UiState.Error(it.message ?: "Failed to load history") }
+        }
+    }
+
+    fun clearWatchHistory() {
+        viewModelScope.launch {
+            watchRepo.clearHistory()
+                .onSuccess { _watchHistory.value = UiState.Success(emptyList()) }
+        }
+    }
+
+    fun deleteHistoryItem(movieId: Int) {
+        viewModelScope.launch {
+            watchRepo.deleteHistoryItem(movieId)
+                .onSuccess {
+                    val current = (_watchHistory.value as? UiState.Success)?.data ?: return@onSuccess
+                    _watchHistory.value = UiState.Success(current.filter { it.movieId != movieId })
+                }
         }
     }
 }
@@ -161,16 +338,61 @@ class MovieViewModel : ViewModel() {
 
 class SeriesViewModel : ViewModel() {
     private val repo = SeriesRepository()
+    private val watchRepo = EpisodeWatchRepository()
 
     private val _seriesDetail = MutableStateFlow<UiState<SeriesResponse>>(UiState.Idle)
     val seriesDetail: StateFlow<UiState<SeriesResponse>> = _seriesDetail.asStateFlow()
+
+    private val _seriesProgress = MutableStateFlow<Map<String, Any>>(emptyMap())
+    val seriesProgress: StateFlow<Map<String, Any>> = _seriesProgress.asStateFlow()
+
+    private val _avgRating = MutableStateFlow<Map<String, Any>>(emptyMap())
+    val avgRating: StateFlow<Map<String, Any>> = _avgRating.asStateFlow()
+
+    private val _ratingState = MutableStateFlow<UiState<SeriesRatingResponse>>(UiState.Idle)
+    val ratingState: StateFlow<UiState<SeriesRatingResponse>> = _ratingState.asStateFlow()
 
     fun loadSeries(seriesId: Int) {
         viewModelScope.launch {
             _seriesDetail.value = UiState.Loading
             repo.getSeries(seriesId)
-                .onSuccess { _seriesDetail.value = UiState.Success(it) }
+                .onSuccess {
+                    _seriesDetail.value = UiState.Success(it)
+                    loadProgress(seriesId)
+                    loadAverageRating(seriesId)
+                }
                 .onFailure { _seriesDetail.value = UiState.Error(it.message ?: "Failed to load series") }
+        }
+    }
+
+    private fun loadProgress(seriesId: Int) {
+        viewModelScope.launch {
+            watchRepo.getSeriesProgress(seriesId)
+                .onSuccess { _seriesProgress.value = it }
+        }
+    }
+
+    private fun loadAverageRating(seriesId: Int) {
+        viewModelScope.launch {
+            val result = RetrofitClient_apiService_call(seriesId)
+            result?.let { _avgRating.value = it }
+        }
+    }
+
+    // Shim — calls through repository
+    private suspend fun RetrofitClient_apiService_call(seriesId: Int): Map<String, Any>? {
+        return try {
+            com.streaming.sunne.data.network.RetrofitClient.apiService
+                .getSeriesAverageRating(seriesId).body()
+        } catch (_: Exception) { null }
+    }
+
+    fun rateSeries(seriesId: Int, rating: Int, review: String? = null) {
+        viewModelScope.launch {
+            _ratingState.value = UiState.Loading
+            watchRepo.rateSeries(seriesId, rating, review)
+                .onSuccess { _ratingState.value = UiState.Success(it) }
+                .onFailure { _ratingState.value = UiState.Error(it.message ?: "Rating failed") }
         }
     }
 }
@@ -185,6 +407,8 @@ class LiveStreamViewModel : ViewModel() {
     private val _streams = MutableStateFlow<UiState<List<LiveStreamPublicResponse>>>(UiState.Idle)
     val streams: StateFlow<UiState<List<LiveStreamPublicResponse>>> = _streams.asStateFlow()
 
+    init { loadStreams() }
+
     fun loadStreams() {
         viewModelScope.launch {
             _streams.value = UiState.Loading
@@ -195,239 +419,171 @@ class LiveStreamViewModel : ViewModel() {
     }
 
     fun joinStream(streamId: Int) {
-        viewModelScope.launch {
-            repo.joinStream(streamId)
-        }
+        viewModelScope.launch { repo.joinStream(streamId) }
     }
 
     fun leaveStream(streamId: Int) {
+        viewModelScope.launch { repo.leaveStream(streamId) }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SEARCH VIEW MODEL  (standalone — used by SearchScreen)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class SearchViewModel : ViewModel() {
+    private val movieRepo  = MovieRepository()
+    private val seriesRepo = SeriesRepository()
+    private val genreRepo  = GenreRepository()
+
+    private val _query   = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+
+    private val _movieResults  = MutableStateFlow<List<MovieResponse>>(emptyList())
+    val movieResults: StateFlow<List<MovieResponse>> = _movieResults.asStateFlow()
+
+    private val _seriesResults = MutableStateFlow<List<SeriesResponse>>(emptyList())
+    val seriesResults: StateFlow<List<SeriesResponse>> = _seriesResults.asStateFlow()
+
+    private val _genres   = MutableStateFlow<List<GenreResponse>>(emptyList())
+    val genres: StateFlow<List<GenreResponse>> = _genres.asStateFlow()
+
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+
+    private val _selectedGenre = MutableStateFlow<GenreResponse?>(null)
+    val selectedGenre: StateFlow<GenreResponse?> = _selectedGenre.asStateFlow()
+
+    init { loadGenres() }
+
+    private fun loadGenres() {
         viewModelScope.launch {
-            repo.leaveStream(streamId)
+            genreRepo.getGenres().onSuccess { _genres.value = it }
+        }
+    }
+
+    fun setQuery(q: String) {
+        _query.value = q
+        if (q.isBlank()) {
+            _movieResults.value = emptyList()
+            _seriesResults.value = emptyList()
+            _isSearching.value = false
+            return
+        }
+        search(q)
+    }
+
+    fun selectGenre(genre: GenreResponse?) {
+        _selectedGenre.value = genre
+        if (genre != null) {
+            searchByGenre(genre.id)
+        } else if (_query.value.isNotBlank()) {
+            search(_query.value)
+        } else {
+            _movieResults.value = emptyList()
+        }
+    }
+
+    private fun search(q: String) {
+        viewModelScope.launch {
+            _isSearching.value = true
+            movieRepo.getMovies(search = q, pageSize = 30)
+                .onSuccess { _movieResults.value = it.movies }
+            seriesRepo.listSeries(search = q, pageSize = 20)
+                .onSuccess { _seriesResults.value = it.series }
+            _isSearching.value = false
+        }
+    }
+
+    private fun searchByGenre(genreId: Int) {
+        viewModelScope.launch {
+            _isSearching.value = true
+            genreRepo.getMoviesByGenre(genreId, pageSize = 30)
+                .onSuccess { _movieResults.value = it.movies }
+            _isSearching.value = false
+        }
+    }
+
+    fun clear() {
+        _query.value = ""
+        _movieResults.value = emptyList()
+        _seriesResults.value = emptyList()
+        _selectedGenre.value = null
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  WATCH HISTORY VIEW MODEL  (standalone — used by WatchHistoryScreen)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class WatchHistoryViewModel : ViewModel() {
+    private val repo = WatchRepository()
+
+    private val _history = MutableStateFlow<UiState<List<WatchHistoryResponse>>>(UiState.Loading)
+    val history: StateFlow<UiState<List<WatchHistoryResponse>>> = _history.asStateFlow()
+
+    private val _showCompletedOnly = MutableStateFlow(false)
+    val showCompletedOnly: StateFlow<Boolean> = _showCompletedOnly.asStateFlow()
+
+    init { load() }
+
+    fun load(completedOnly: Boolean = false) {
+        _showCompletedOnly.value = completedOnly
+        viewModelScope.launch {
+            _history.value = UiState.Loading
+            repo.getHistory(completedOnly)
+                .onSuccess { _history.value = UiState.Success(it) }
+                .onFailure { _history.value = UiState.Error(it.message ?: "Failed") }
+        }
+    }
+
+    fun toggleFilter() = load(!_showCompletedOnly.value)
+
+    fun deleteItem(movieId: Int) {
+        viewModelScope.launch {
+            repo.deleteHistoryItem(movieId).onSuccess {
+                val cur = (_history.value as? UiState.Success)?.data ?: return@onSuccess
+                _history.value = UiState.Success(cur.filter { it.movieId != movieId })
+            }
+        }
+    }
+
+    fun clearAll() {
+        viewModelScope.launch {
+            repo.clearHistory().onSuccess { _history.value = UiState.Success(emptyList()) }
         }
     }
 }
 
-//package com.streaming.sunne.viewmodel
-//
-//import androidx.lifecycle.ViewModel
-//import androidx.lifecycle.viewModelScope
-//import com.streaming.sunne.data.model.*
-//import com.streaming.sunne.data.network.TokenManager
-//import com.streaming.sunne.repository.AuthRepository
-//import com.streaming.sunne.repository.MovieRepository
-//import kotlinx.coroutines.flow.*
-//import kotlinx.coroutines.launch
-//
-//// ─── Shared UI State helpers ───────────────────────────────────────────────────
-//
-//sealed class UiState<out T> {
-//    object Idle    : UiState<Nothing>()
-//    object Loading : UiState<Nothing>()
-//    data class Success<T>(val data: T) : UiState<T>()
-//    data class Error(val message: String) : UiState<Nothing>()
-//}
-//
-//// ─── AuthViewModel ─────────────────────────────────────────────────────────────
-//
-//class AuthViewModel : ViewModel() {
-//
-//    private val repo = AuthRepository()
-//
-//    private val _authState = MutableStateFlow<UiState<UserResponse>>(UiState.Idle)
-//    val authState: StateFlow<UiState<UserResponse>> = _authState.asStateFlow()
-//
-//    private val _currentUser = MutableStateFlow<UserResponse?>(null)
-//    val currentUser: StateFlow<UserResponse?> = _currentUser.asStateFlow()
-//
-//    val isLoggedIn: Boolean get() = TokenManager.isLoggedIn
-//
-//    /** Login with username + password */
-//    fun login(username: String, password: String) {
-//        viewModelScope.launch {
-//            _authState.value = UiState.Loading
-//            val result = repo.login(username, password)
-//            if (result.isSuccess) {
-//                loadCurrentUser()
-//            } else {
-//                _authState.value = UiState.Error(
-//                    result.exceptionOrNull()?.message ?: "Login failed"
-//                )
-//            }
-//        }
-//    }
-//
-//    /** Register a new account then auto-login */
-//    fun register(
-//        username: String,
-//        email: String,
-//        password: String,
-//        fullName: String? = null
-//    ) {
-//        viewModelScope.launch {
-//            _authState.value = UiState.Loading
-//            val result = repo.register(username, email, password, fullName)
-//            result.onSuccess { user ->
-//                _currentUser.value = user
-//                // auto-login after register
-//                login(username, password)
-//            }.onFailure {
-//                _authState.value = UiState.Error(it.message ?: "Registration failed")
-//            }
-//        }
-//    }
-//
-//    /** Load current user profile (/me) */
-//    fun loadCurrentUser() {
-//        viewModelScope.launch {
-//            val result = repo.getMe()
-//            result.onSuccess { user ->
-//                _currentUser.value = user
-//                TokenManager.isAdmin = user.isAdmin
-//                _authState.value = UiState.Success(user)
-//            }.onFailure {
-//                _authState.value = UiState.Error(it.message ?: "Failed to load user")
-//            }
-//        }
-//    }
-//
-//    /** Logout */
-//    fun logout() {
-//        viewModelScope.launch {
-//            repo.logout()
-//            _currentUser.value = null
-//            _authState.value = UiState.Idle
-//        }
-//    }
-//}
-//
-//// ─── HomeUiState ──────────────────────────────────────────────────────────────
-//
-//sealed class HomeUiState {
-//    object Loading : HomeUiState()
-//    data class Success(val categories: List<MovieCategory>) : HomeUiState()
-//    data class Error(val message: String) : HomeUiState()
-//}
-//
-//// ─── MovieViewModel ────────────────────────────────────────────────────────────
-//
-//class MovieViewModel : ViewModel() {
-//
-//    private val repo = MovieRepository()
-//
-//    // Home screen state
-//    private val _homeState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
-//    val homeState: StateFlow<HomeUiState> = _homeState.asStateFlow()
-//
-//    // Currently selected movie (for DetailsScreen / PlayerScreen)
-//    private val _selectedMovie = MutableStateFlow<MovieResponse?>(null)
-//    val selectedMovie: StateFlow<MovieResponse?> = _selectedMovie.asStateFlow()
-//
-//    // Stream URL for PlayerScreen
-//    private val _streamUrl = MutableStateFlow<UiState<String>>(UiState.Idle)
-//    val streamUrl: StateFlow<UiState<String>> = _streamUrl.asStateFlow()
-//
-//    // Search results
-//    private val _searchResults = MutableStateFlow<UiState<List<MovieResponse>>>(UiState.Idle)
-//    val searchResults: StateFlow<UiState<List<MovieResponse>>> = _searchResults.asStateFlow()
-//
-//    init {
-//        loadCategories()
-//    }
-//
-//    /** Load all category carousels for HomeScreen */
-//    fun loadCategories() {
-//        viewModelScope.launch {
-//            _homeState.value = HomeUiState.Loading
-//            val result = repo.getMovieCategories()
-//            _homeState.value = if (result.isSuccess) {
-//                val cats = result.getOrNull() ?: emptyList()
-//                if (cats.isEmpty()) HomeUiState.Error("No content available")
-//                else HomeUiState.Success(cats)
-//            } else {
-//                HomeUiState.Error(result.exceptionOrNull()?.message ?: "Failed to load content")
-//            }
-//        }
-//    }
-//
-//    /** Select a movie to show in DetailsScreen */
-//    fun selectMovie(movie: MovieResponse) {
-//        _selectedMovie.value = movie
-//    }
-//
-//    /** Clear selected movie */
-//    fun clearSelectedMovie() {
-//        _selectedMovie.value = null
-//        _streamUrl.value = UiState.Idle
-//    }
-//
-//    /**
-//     * Load the streaming URL for the selected movie.
-//     * Quality: "1080p" | "720p" | "480p"
-//     */
-//    fun loadStreamUrl(movieId: Int, quality: String = "1080p") {
-//        viewModelScope.launch {
-//            _streamUrl.value = UiState.Loading
-//            val result = repo.getStreamUrl(movieId, quality)
-//            _streamUrl.value = if (result.isSuccess) {
-//                val url = result.getOrNull()?.url
-//                if (url != null) UiState.Success(url)
-//                else UiState.Error("Stream URL not available")
-//            } else {
-//                // Fallback: use video_url from the movie model if API fails
-//                val fallback = _selectedMovie.value?.videoUrl
-//                if (fallback != null) UiState.Success(fallback)
-//                else UiState.Error(result.exceptionOrNull()?.message ?: "Failed to get stream URL")
-//            }
-//        }
-//    }
-//
-//    /** Increment view count (fire-and-forget) */
-//    fun trackView(movieId: Int) {
-//        viewModelScope.launch { repo.incrementViewCount(movieId) }
-//    }
-//
-//    /** Search movies */
-//    fun search(query: String) {
-//        if (query.isBlank()) {
-//            _searchResults.value = UiState.Idle
-//            return
-//        }
-//        viewModelScope.launch {
-//            _searchResults.value = UiState.Loading
-//            val result = repo.getMovies(search = query, pageSize = 50)
-//            _searchResults.value = if (result.isSuccess) {
-//                UiState.Success(result.getOrNull()?.movies ?: emptyList())
-//            } else {
-//                UiState.Error(result.exceptionOrNull()?.message ?: "Search failed")
-//            }
-//        }
-//    }
-//
-//    fun retry() = loadCategories()
-//}
-//
-//// ─── Backwards compatibility aliases ──────────────────────────────────────────
-//// The old codebase used StreamViewModel / StreamUiState — these aliases let
-//// existing screen files compile without modification until you migrate them.
-//
-//typealias StreamViewModel = MovieViewModel
-//
-//sealed class StreamUiState {
-//    object Loading : StreamUiState()
-//    data class Success(val categories: List<MovieCategory>) : StreamUiState()
-//    data class Error(val message: String) : StreamUiState()
-//}
-//
-///** Extension to expose homeState as uiState for screens using the old name */
-//val MovieViewModel.uiState: StateFlow<StreamUiState>
-//    get() = homeState.map { home ->
-//        when (home) {
-//            is HomeUiState.Loading        -> StreamUiState.Loading
-//            is HomeUiState.Success        -> StreamUiState.Success(home.categories)
-//            is HomeUiState.Error          -> StreamUiState.Error(home.message)
-//        }
-//    }.stateIn(
-//        scope = viewModelScope,
-//        started = SharingStarted.WhileSubscribed(5_000),
-//        initialValue = StreamUiState.Loading
-//    )
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PROFILE VIEW MODEL  (standalone — used by ProfileScreen)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class ProfileViewModel : ViewModel() {
+    private val authRepo = AuthRepository()
+    private val recRepo  = RecommendationRepository()
+
+    private val _updateState = MutableStateFlow<UiState<UserResponse>>(UiState.Idle)
+    val updateState: StateFlow<UiState<UserResponse>> = _updateState.asStateFlow()
+
+    private val _forYou = MutableStateFlow<List<RecommendationResponse>>(emptyList())
+    val forYou: StateFlow<List<RecommendationResponse>> = _forYou.asStateFlow()
+
+    init { loadRecommendations() }
+
+    private fun loadRecommendations() {
+        viewModelScope.launch {
+            recRepo.getForYou(limit = 10)
+                .onSuccess { _forYou.value = it }
+        }
+    }
+
+    fun updateProfile(email: String?, fullName: String?, password: String?) {
+        viewModelScope.launch {
+            _updateState.value = UiState.Loading
+            authRepo.updateMe(UserUpdate(email, fullName, password))
+                .onSuccess { _updateState.value = UiState.Success(it) }
+                .onFailure { _updateState.value = UiState.Error(it.message ?: "Update failed") }
+        }
+    }
+}
