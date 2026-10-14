@@ -22,19 +22,81 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.scale
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.streaming.sunne.data.model.*
 import com.streaming.sunne.ui.adaptive.*
 import com.streaming.sunne.ui.theme.*
+import com.streaming.sunne.viewmodel.SeriesViewModel
+import com.streaming.sunne.viewmodel.UiState
 
 @Composable
 fun SeriesDetailScreen(
+    initial: SeriesResponse,
+    onEpisodeClick: (SeriesResponse, EpisodeResponse) -> Unit,
+    onBackClick: () -> Unit
+) {
+    val viewModel: SeriesViewModel = viewModel(key = "series-${initial.id}")
+    val state    by viewModel.seriesDetail.collectAsState()
+    val progress by viewModel.progress.collectAsState()
+
+    LaunchedEffect(initial.id) { viewModel.loadSeries(initial.id, initial) }
+
+    // Refresh episode progress when coming back from the player
+    OnResumeEffect(initial.id, skipFirst = true) { viewModel.refreshProgress(initial.id) }
+
+    val series = (state as? UiState.Success)?.data ?: initial
+    SeriesDetailContent(
+        series         = series,
+        progress       = progress,
+        isLoading      = state is UiState.Loading,
+        error          = (state as? UiState.Error)?.message,
+        onRetry        = { viewModel.loadSeries(initial.id) },
+        onEpisodeClick = { onEpisodeClick(series, it) },
+        onBackClick    = onBackClick
+    )
+}
+
+/** Episode to start from: resume the last unfinished one, else the next unwatched, else S1E1. */
+private fun resumeTarget(
     series: SeriesResponse,
+    progress: Map<Int, EpisodeProgressItem>
+): Pair<EpisodeResponse, String>? {
+    val ordered = series.seasons.sortedBy { it.seasonNumber }.flatMap { season ->
+        season.episodes.filter { it.status == "ready" }.sortedBy { it.episodeNumber }.map { season to it }
+    }
+    if (ordered.isEmpty()) return null
+    fun label(verb: String, i: Int) = "$verb S${ordered[i].first.seasonNumber}:E${ordered[i].second.episodeNumber}"
+
+    val lastWatched = ordered.indexOfLast { progress.containsKey(it.second.id) }
+    if (lastWatched == -1) return ordered[0].second to label("Play", 0)
+    if (progress[ordered[lastWatched].second.id]?.completed == false) {
+        return ordered[lastWatched].second to label("Resume", lastWatched)
+    }
+    val next = lastWatched + 1
+    return if (next < ordered.size) ordered[next].second to label("Play", next)
+    else ordered[0].second to "Watch again"
+}
+
+@Composable
+private fun SeriesDetailContent(
+    series: SeriesResponse,
+    progress: Map<Int, EpisodeProgressItem>,
+    isLoading: Boolean,
+    error: String?,
+    onRetry: () -> Unit,
     onEpisodeClick: (EpisodeResponse) -> Unit,
     onBackClick: () -> Unit
 ) {
     val ad = rememberAdaptive()
     var expandedSeasons by remember { mutableStateOf(setOf(1)) } // First season expanded by default
+    val target = remember(series, progress) { resumeTarget(series, progress) }
+    LaunchedEffect(target) {
+        target?.first?.let { ep ->
+            series.seasons.firstOrNull { s -> s.episodes.any { it.id == ep.id } }
+                ?.let { expandedSeasons = expandedSeasons + it.seasonNumber }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -101,6 +163,39 @@ fun SeriesDetailScreen(
                                 RatingChip(it)
                             }
                         }
+
+                        target?.let { (episode, label) ->
+                            Spacer(Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(White)
+                                    .clickable { onEpisodeClick(episode) }
+                                    .padding(horizontal = 24.dp, vertical = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(22.dp))
+                                Text(label, fontSize = sp(15), fontWeight = FontWeight.Bold, color = Color.Black)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isLoading && series.seasons.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), Alignment.Center) {
+                        CircularProgressIndicator(color = NetflixRed)
+                    }
+                }
+            }
+
+            error?.let { message ->
+                item {
+                    Column(Modifier.fillMaxWidth().padding(ad.pad), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(message, fontSize = sp(14), color = LightGray)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Retry", fontSize = sp(15), fontWeight = FontWeight.Bold, color = NetflixRed,
+                            modifier = Modifier.clickable { onRetry() }.padding(8.dp))
                     }
                 }
             }
@@ -138,6 +233,7 @@ fun SeriesDetailScreen(
             items(series.seasons.sortedBy { it.seasonNumber }) { season ->
                 SeasonSection(
                     season = season,
+                    progress = progress,
                     isExpanded = expandedSeasons.contains(season.seasonNumber),
                     adaptive = ad,
                     onToggle = {
@@ -159,6 +255,7 @@ fun SeriesDetailScreen(
 @Composable
 private fun SeasonSection(
     season: SeasonResponse,
+    progress: Map<Int, EpisodeProgressItem>,
     isExpanded: Boolean,
     adaptive: Adaptive,
     onToggle: () -> Unit,
@@ -200,7 +297,7 @@ private fun SeasonSection(
         AnimatedVisibility(visible = isExpanded) {
             Column {
                 season.episodes.sortedBy { it.episodeNumber }.forEach { episode ->
-                    EpisodeRow(episode, adaptive, onEpisodeClick)
+                    EpisodeRow(episode, progress[episode.id], adaptive, onEpisodeClick)
                 }
             }
         }
@@ -212,6 +309,7 @@ private fun SeasonSection(
 @Composable
 private fun EpisodeRow(
     episode: EpisodeResponse,
+    progress: EpisodeProgressItem?,
     adaptive: Adaptive,
     onClick: (EpisodeResponse) -> Unit
 ) {
@@ -272,6 +370,10 @@ private fun EpisodeRow(
                     overflow = TextOverflow.Ellipsis,
                     lineHeight = sp(16)
                 )
+            }
+            progress?.let {
+                Spacer(Modifier.height(6.dp))
+                WatchProgressBar(if (it.completed) 1f else it.watchPercentage / 100f)
             }
         }
 

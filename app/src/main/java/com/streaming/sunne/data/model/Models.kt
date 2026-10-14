@@ -275,6 +275,13 @@ data class WatchHistoryResponse(
     @SerializedName("created_at")       val createdAt: String
 )
 
+data class ContinueWatchingMovie(
+    @SerializedName("movie_id")         val movieId: Int,
+    @SerializedName("watch_percentage") val watchPercentage: Float,
+    @SerializedName("last_position")    val lastPosition: Int,
+    @SerializedName("movie")            val movie: MovieResponse?
+)
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  EPISODE WATCH HISTORY
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -295,6 +302,75 @@ data class EpisodeProgressResponse(
     @SerializedName("completed")        val completed: Boolean,
     @SerializedName("watched_at")       val watchedAt: String
 )
+
+data class EpisodeProgressItem(
+    @SerializedName("episode_id")       val episodeId: Int,
+    @SerializedName("watch_percentage") val watchPercentage: Float,
+    @SerializedName("last_position")    val lastPosition: Int,
+    @SerializedName("completed")        val completed: Boolean
+)
+
+data class SeriesContinueWatching(
+    @SerializedName("series_id")               val seriesId: Int,
+    @SerializedName("series_title")            val seriesTitle: String,
+    @SerializedName("series_poster")           val seriesPoster: String?,
+    @SerializedName("series_backdrop")         val seriesBackdrop: String?,
+    @SerializedName("resume_episode_id")       val resumeEpisodeId: Int,
+    @SerializedName("resume_episode_number")   val resumeEpisodeNumber: Int,
+    @SerializedName("resume_season_number")    val resumeSeasonNumber: Int,
+    @SerializedName("resume_episode_title")    val resumeEpisodeTitle: String?,
+    @SerializedName("last_position")           val lastPosition: Int,
+    @SerializedName("watch_percentage")        val watchPercentage: Float
+) {
+    val episodeLabel: String get() = "S$resumeSeasonNumber:E$resumeEpisodeNumber"
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PLAY NEXT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+data class PlayNextSuggestion(
+    @SerializedName("series_id")  val seriesId: Int?,
+    @SerializedName("title")      val title: String,
+    @SerializedName("poster_url") val posterUrl: String?
+)
+
+data class PlayNextResponse(
+    @SerializedName("type")           val type: String,
+    @SerializedName("reason")         val reason: String?,
+    @SerializedName("movie_id")       val movieId: Int?,
+    @SerializedName("series_id")      val seriesId: Int?,
+    @SerializedName("episode_id")     val episodeId: Int?,
+    @SerializedName("season_id")      val seasonId: Int?,
+    @SerializedName("episode_number") val episodeNumber: Int?,
+    @SerializedName("season_number")  val seasonNumber: Int?,
+    @SerializedName("title")          val title: String?,
+    @SerializedName("description")    val description: String?,
+    @SerializedName("duration")       val duration: Int?,
+    @SerializedName("thumbnail_url")  val thumbnailUrl: String?,
+    @SerializedName("poster_url")     val posterUrl: String?,
+    @SerializedName("video_url")      val videoUrl: String?,
+    @SerializedName("items")          val items: List<PlayNextSuggestion>?
+) {
+    /** Builds a playable episode from a `type = "episode"` response. */
+    fun toEpisode(): EpisodeResponse? {
+        val id = episodeId ?: return null
+        return EpisodeResponse(
+            id            = id,
+            seasonId      = seasonId ?: 0,
+            episodeNumber = episodeNumber ?: 0,
+            title         = title ?: "",
+            description   = description,
+            duration      = duration,
+            thumbnailUrl  = thumbnailUrl,
+            videoUrl      = videoUrl,
+            status        = "ready",
+            viewCount     = 0,
+            createdAt     = "",
+            updatedAt     = ""
+        )
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  RATINGS
@@ -437,6 +513,8 @@ data class ConversionJobResponse(
 //  UI HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+const val CONTINUE_WATCHING = "Continue Watching"
+
 /** Client-side grouping for carousels — supports both movies and series */
 data class ContentRow(
     val label: String,
@@ -445,12 +523,14 @@ data class ContentRow(
 
 /** Unified content type for mixed carousels */
 sealed class ContentItem {
-    data class Movie(val data: MovieResponse) : ContentItem() {
+    /** [progress] is the watched fraction (0..1) for Continue Watching cards. */
+    data class Movie(val data: MovieResponse, val progress: Float? = null) : ContentItem() {
         val id get() = data.id
         val title get() = data.title
         val thumbnailUrl get() = data.thumbnailUrl
         val isTrending get() = data.isTrending
     }
+    data class ContinueSeries(val data: SeriesContinueWatching) : ContentItem()
     data class Series(val data: SeriesResponse) : ContentItem() {
         val id get() = data.id
         val title get() = data.title

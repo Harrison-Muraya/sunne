@@ -71,12 +71,16 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    /** Clears UI state synchronously so the Login screen never sees a stale Success. */
     fun logout() {
-        viewModelScope.launch {
-            repo.logout()
-            _currentUser.value = null
-            _authState.value = UiState.Idle
-        }
+        _currentUser.value = null
+        _authState.value = UiState.Idle
+        viewModelScope.launch { repo.logout() }
+    }
+
+    fun onSessionExpired() {
+        _currentUser.value = null
+        _authState.value = UiState.Error("Your session has expired. Please sign in again.")
     }
 }
 
@@ -86,14 +90,17 @@ class AuthViewModel : ViewModel() {
 
 class MovieViewModel : ViewModel() {
 
-    private val movieRepo = MovieRepository()
-    private val homeRepo  = HomeContentRepository()
+    private val movieRepo  = MovieRepository()
+    private val seriesRepo = SeriesRepository()
+    private val homeRepo   = HomeContentRepository()
 
     private val _homeState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val homeState: StateFlow<HomeUiState> = _homeState.asStateFlow()
+    private var homeLoaded = false
 
-    private val _streamUrl = MutableStateFlow<UiState<String>>(UiState.Idle)
-    val streamUrl: StateFlow<UiState<String>> = _streamUrl.asStateFlow()
+    /** Non-null while a tap is resolving content by id (e.g. Continue Watching, Up Next). */
+    private val _opening = MutableStateFlow<String?>(null)
+    val opening: StateFlow<String?> = _opening.asStateFlow()
 
     // Selected content for detail screens
     private val _selectedMovie = MutableStateFlow<MovieResponse?>(null)
@@ -108,20 +115,80 @@ class MovieViewModel : ViewModel() {
     private val _selectedLiveStream = MutableStateFlow<LiveStreamPublicResponse?>(null)
     val selectedLiveStream: StateFlow<LiveStreamPublicResponse?> = _selectedLiveStream.asStateFlow()
 
-    init {
-        loadHomeContent()
+    fun ensureHomeLoaded() {
+        if (!homeLoaded) loadHomeContent()
     }
 
     fun loadHomeContent() {
+        homeLoaded = true
         viewModelScope.launch {
-            _homeState.value = HomeUiState.Loading
+            if (_homeState.value !is HomeUiState.Success) _homeState.value = HomeUiState.Loading
             homeRepo.getHomeContent()
                 .onSuccess { _homeState.value = HomeUiState.Success(it) }
-                .onFailure { _homeState.value = HomeUiState.Error(it.message ?: "Failed to load content") }
+                .onFailure {
+                    homeLoaded = false
+                    _homeState.value = HomeUiState.Error(friendlyMessage(it))
+                }
         }
     }
 
     fun retry() = loadHomeContent()
+
+    fun refreshContinueWatching() {
+        if (_homeState.value !is HomeUiState.Success) return
+        viewModelScope.launch {
+            val row = homeRepo.continueWatchingRow()
+            val current = _homeState.value as? HomeUiState.Success ?: return@launch
+            val others = current.categories.filter { it.label != CONTINUE_WATCHING }
+            _homeState.value = HomeUiState.Success(listOfNotNull(row) + others)
+        }
+    }
+
+    /** Drops everything tied to the signed-in user (logout, session expiry). */
+    fun reset() {
+        homeLoaded = false
+        _homeState.value = HomeUiState.Loading
+        _selectedMovie.value = null
+        _selectedSeries.value = null
+        _selectedEpisode.value = null
+        _selectedLiveStream.value = null
+        _opening.value = null
+        _openError.value = null
+    }
+
+    fun openMovie(movieId: Int, onReady: () -> Unit) = resolve("movie") {
+        movieRepo.getMovie(movieId).onSuccess { selectMovie(it); onReady() }
+    }
+
+    fun openSeries(seriesId: Int, onReady: () -> Unit) = resolve("series") {
+        seriesRepo.getSeries(seriesId).onSuccess { selectSeries(it); onReady() }
+    }
+
+    /** Continue Watching card for a series: jump straight into the resume episode. */
+    fun resumeSeries(item: SeriesContinueWatching, onPlay: () -> Unit, onDetails: () -> Unit) = resolve("series") {
+        seriesRepo.getSeries(item.seriesId).onSuccess { series ->
+            selectSeries(series)
+            val episode = series.seasons.flatMap { it.episodes }.firstOrNull { it.id == item.resumeEpisodeId }
+            if (episode != null) { selectEpisode(episode); onPlay() } else onDetails()
+        }
+    }
+
+    private fun resolve(what: String, block: suspend () -> Result<*>) {
+        if (_opening.value != null) return
+        viewModelScope.launch {
+            _opening.value = what
+            try {
+                block().onFailure { _openError.value = "Couldn't open this $what. ${friendlyMessage(it)}" }
+            } finally {
+                _opening.value = null
+            }
+        }
+    }
+
+    private val _openError = MutableStateFlow<String?>(null)
+    val openError: StateFlow<String?> = _openError.asStateFlow()
+
+    fun clearOpenError() { _openError.value = null }
 
     fun selectMovie(movie: MovieResponse) {
         _selectedMovie.value = movie
@@ -138,21 +205,6 @@ class MovieViewModel : ViewModel() {
     fun selectLiveStream(stream: LiveStreamPublicResponse) {
         _selectedLiveStream.value = stream
     }
-
-    fun loadStreamUrl(movieId: Int, quality: String = "1080p") {
-        viewModelScope.launch {
-            _streamUrl.value = UiState.Loading
-            movieRepo.getStreamUrl(movieId, quality)
-                .onSuccess { _streamUrl.value = UiState.Success(it.url) }
-                .onFailure { _streamUrl.value = UiState.Error(it.message ?: "Failed to load stream") }
-        }
-    }
-
-    fun trackView(movieId: Int) {
-        viewModelScope.launch {
-            movieRepo.incrementViewCount(movieId)
-        }
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -160,17 +212,35 @@ class MovieViewModel : ViewModel() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class SeriesViewModel : ViewModel() {
-    private val repo = SeriesRepository()
+    private val repo         = SeriesRepository()
+    private val episodeWatch = EpisodeWatchRepository()
 
     private val _seriesDetail = MutableStateFlow<UiState<SeriesResponse>>(UiState.Idle)
     val seriesDetail: StateFlow<UiState<SeriesResponse>> = _seriesDetail.asStateFlow()
 
-    fun loadSeries(seriesId: Int) {
+    private val _progress = MutableStateFlow<Map<Int, EpisodeProgressItem>>(emptyMap())
+    val progress: StateFlow<Map<Int, EpisodeProgressItem>> = _progress.asStateFlow()
+
+    fun loadSeries(seriesId: Int, initial: SeriesResponse? = null) {
         viewModelScope.launch {
-            _seriesDetail.value = UiState.Loading
+            if (initial != null && initial.id == seriesId) _seriesDetail.value = UiState.Success(initial)
+            else _seriesDetail.value = UiState.Loading
             repo.getSeries(seriesId)
                 .onSuccess { _seriesDetail.value = UiState.Success(it) }
-                .onFailure { _seriesDetail.value = UiState.Error(it.message ?: "Failed to load series") }
+                .onFailure {
+                    if (_seriesDetail.value !is UiState.Success) {
+                        _seriesDetail.value = UiState.Error(friendlyMessage(it))
+                    }
+                }
+        }
+        refreshProgress(seriesId)
+    }
+
+    fun refreshProgress(seriesId: Int) {
+        viewModelScope.launch {
+            episodeWatch.getSeriesProgress(seriesId).onSuccess { items ->
+                _progress.value = items.associateBy { it.episodeId }
+            }
         }
     }
 }
@@ -191,6 +261,15 @@ class LiveStreamViewModel : ViewModel() {
             repo.listStreams()
                 .onSuccess { _streams.value = UiState.Success(it) }
                 .onFailure { _streams.value = UiState.Error(it.message ?: "Failed to load streams") }
+        }
+    }
+
+    private val _viewerCount = MutableStateFlow<Int?>(null)
+    val viewerCount: StateFlow<Int?> = _viewerCount.asStateFlow()
+
+    fun refreshViewerCount(streamId: Int) {
+        viewModelScope.launch {
+            repo.getStream(streamId).onSuccess { _viewerCount.value = it.viewerCount }
         }
     }
 

@@ -21,31 +21,70 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import coil.compose.AsyncImage
+import androidx.compose.material.icons.outlined.ThumbUp
 import coil.compose.rememberAsyncImagePainter
 import com.streaming.sunne.data.model.MovieResponse
+import com.streaming.sunne.data.model.WatchHistoryResponse
+import com.streaming.sunne.repository.WatchRepository
+import kotlinx.coroutines.launch
 import com.streaming.sunne.ui.adaptive.*
 import com.streaming.sunne.ui.theme.*
-import com.streaming.sunne.viewmodel.HomeUiState
 import com.streaming.sunne.viewmodel.MovieViewModel
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  DETAILS SCREEN — landscape (TV/tablet) vs portrait (phone)
 // ══════════════════════════════════════════════════════════════════════════════
+/** Per-user state shown on the details page: resume position and like. */
+private data class DetailsUserState(
+    val progress: WatchHistoryResponse? = null,
+    val liked: Boolean = false,
+    val onToggleLike: () -> Unit = {}
+) {
+    val resumable: Boolean
+        get() = progress != null && !progress.completed && progress.lastPosition >= 10 && progress.watchPercentage < 95f
+}
+
 @Composable
 fun DetailsScreen(
     movie: MovieResponse,
     onPlayClick: () -> Unit,
     onBackClick: () -> Unit
 ) {
-    val ad = rememberAdaptive()
-    if (ad.isPhone) DetailsPortrait(movie, onPlayClick, onBackClick, ad)
-    else            DetailsLandscape(movie, onPlayClick, onBackClick, ad)
+    val ad        = rememberAdaptive()
+    val scope     = rememberCoroutineScope()
+    val watchRepo = remember { WatchRepository() }
+    var progress  by remember(movie.id) { mutableStateOf<WatchHistoryResponse?>(null) }
+    var liked     by remember(movie.id) { mutableStateOf(false) }
+
+    LaunchedEffect(movie.id) {
+        liked = (watchRepo.getMyRating(movie.id).getOrNull()?.rating ?: 0) >= 4
+    }
+    OnResumeEffect(movie.id) {
+        scope.launch { progress = watchRepo.getProgress(movie.id).getOrNull() }
+    }
+
+    val user = DetailsUserState(
+        progress = progress,
+        liked    = liked,
+        onToggleLike = {
+            val wasLiked = liked
+            liked = !wasLiked
+            scope.launch {
+                val result = if (wasLiked) watchRepo.deleteMyRating(movie.id)
+                             else watchRepo.rateMovie(movie.id, 5)
+                if (result.isFailure) liked = wasLiked
+            }
+        }
+    )
+
+    if (ad.isPhone) DetailsPortrait(movie, user, onPlayClick, onBackClick, ad)
+    else            DetailsLandscape(movie, user, onPlayClick, onBackClick, ad)
 }
 
 // ── TV / Tablet — side-by-side poster + info ──────────────────────────────────
 @Composable
 private fun DetailsLandscape(
-    movie: MovieResponse, onPlayClick: () -> Unit, onBackClick: () -> Unit, ad: Adaptive
+    movie: MovieResponse, user: DetailsUserState, onPlayClick: () -> Unit, onBackClick: () -> Unit, ad: Adaptive
 ) {
     Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
         // Full bleed backdrop
@@ -75,7 +114,7 @@ private fun DetailsLandscape(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Center
         ) {
-            DetailsInfo(movie, onPlayClick, ad)
+            DetailsInfo(movie, user, onPlayClick, ad)
         }
     }
 }
@@ -83,7 +122,7 @@ private fun DetailsLandscape(
 // ── Phone — stacked image + scrollable info ───────────────────────────────────
 @Composable
 private fun DetailsPortrait(
-    movie: MovieResponse, onPlayClick: () -> Unit, onBackClick: () -> Unit, ad: Adaptive
+    movie: MovieResponse, user: DetailsUserState, onPlayClick: () -> Unit, onBackClick: () -> Unit, ad: Adaptive
 ) {
     Column(
         modifier = Modifier.fillMaxSize().background(DarkBackground)
@@ -97,13 +136,13 @@ private fun DetailsPortrait(
             BackBtn(onBackClick, Modifier.align(Alignment.TopStart).padding(14.dp))
         }
         Column(Modifier.padding(ad.pad)) {
-            DetailsInfo(movie, onPlayClick, ad)
+            DetailsInfo(movie, user, onPlayClick, ad)
         }
     }
 }
 
 @Composable
-private fun DetailsInfo(movie: MovieResponse, onPlayClick: () -> Unit, ad: Adaptive) {
+private fun DetailsInfo(movie: MovieResponse, user: DetailsUserState, onPlayClick: () -> Unit, ad: Adaptive) {
     // Genre chip
     if (movie.genreNames().isNotEmpty()) {
         Box(
@@ -160,9 +199,20 @@ private fun DetailsInfo(movie: MovieResponse, onPlayClick: () -> Unit, ad: Adapt
 
     Spacer(Modifier.height(26.dp))
 
+    user.progress?.takeIf { user.resumable }?.let { p ->
+        WatchProgressBar(p.watchPercentage / 100f, Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(2.dp)))
+        Spacer(Modifier.height(6.dp))
+        val remainingMin = movie.duration?.let { ((it - p.lastPosition).coerceAtLeast(0) / 60) }
+        Text(
+            remainingMin?.let { "${it}m left" } ?: "Resume from ${formatClock(p.lastPosition * 1000L)}",
+            fontSize = sp(12), color = LightGray
+        )
+        Spacer(Modifier.height(12.dp))
+    }
+
     // Action buttons
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        // Play
+        // Play / Resume
         Row(
             modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(White)
                 .clickable { onPlayClick() }
@@ -173,13 +223,16 @@ private fun DetailsInfo(movie: MovieResponse, onPlayClick: () -> Unit, ad: Adapt
         ) {
             Icon(Icons.Default.PlayArrow, null, tint = Color.Black,
                 modifier = Modifier.size(if (ad.isPhone) 20.dp else 26.dp))
-            Text("Play", fontSize = if (ad.isPhone) sp(14) else sp(17),
+            Text(if (user.resumable) "Resume" else "Play", fontSize = if (ad.isPhone) sp(14) else sp(17),
                 fontWeight = FontWeight.Bold, color = Color.Black)
         }
-        // Add
-        IconCircleBtn(Icons.Default.Add, if (ad.isPhone) 38.dp else 48.dp)
-        // Rate
-        IconCircleBtn(Icons.Default.ThumbUp, if (ad.isPhone) 38.dp else 48.dp)
+        // Like
+        IconCircleBtn(
+            icon     = if (user.liked) Icons.Default.ThumbUp else Icons.Outlined.ThumbUp,
+            size     = if (ad.isPhone) 38.dp else 48.dp,
+            selected = user.liked,
+            onClick  = user.onToggleLike
+        )
     }
 }
 
@@ -192,10 +245,17 @@ private fun LabelRow(label: String, value: String) {
 }
 
 @Composable
-private fun IconCircleBtn(icon: androidx.compose.ui.graphics.vector.ImageVector, size: Dp) {
+private fun IconCircleBtn(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    size: Dp,
+    selected: Boolean = false,
+    onClick: () -> Unit
+) {
     Box(
         modifier = Modifier.size(size).clip(CircleShape)
-            .background(White.copy(0.12f)).border(1.5.dp, White.copy(0.3f), CircleShape).clickable {},
+            .background(if (selected) NetflixRed.copy(0.25f) else White.copy(0.12f))
+            .border(1.5.dp, if (selected) NetflixRed else White.copy(0.3f), CircleShape)
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) { Icon(icon, null, tint = White, modifier = Modifier.size(size * 0.45f)) }
 }
@@ -212,245 +272,6 @@ fun BackBtn(onClick: () -> Unit, modifier: Modifier = Modifier) {
     ) { Icon(Icons.Default.ArrowBack, "Back", tint = White, modifier = Modifier.size(20.dp)) }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  LIVE SCREEN — side panel (TV/tablet) vs stacked (phone)
-// ══════════════════════════════════════════════════════════════════════════════
-@Composable
-fun LiveScreen(
-    viewModel: MovieViewModel,
-    onChannelPlay: (MovieResponse) -> Unit,
-    onBackClick: () -> Unit
-) {
-    val homeState  = viewModel.homeState.collectAsState().value
-    val ad         = rememberAdaptive()
-    var preview by remember { mutableStateOf<MovieResponse?>(null) }
-
-    val movies: List<MovieResponse> = when (val s = homeState) {
-        is HomeUiState.Success -> s.categories
-            .flatMap { it.items }
-            .filterIsInstance<com.streaming.sunne.data.model.ContentItem.Movie>()
-            .map { it.data }
-            .distinctBy { it.id }
-        else -> emptyList()
-    }
-    LaunchedEffect(movies) { if (preview == null) preview = movies.firstOrNull() }
-
-    Box(Modifier.fillMaxSize().background(DarkBackground)) {
-        if (!ad.isPhone) {
-            // TV / Tablet — side-by-side
-            Row(Modifier.fillMaxSize()) {
-                LiveChannelPanel(movies, preview, ad, onBackClick,
-                    onHover  = { preview = it },
-                    onSelect = { onChannelPlay(it) }
-                )
-                LivePreviewPanel(preview, ad, onPlay = { preview?.let { onChannelPlay(it) } })
-            }
-        } else {
-            // Phone — vertical
-            Column(Modifier.fillMaxSize()) {
-                LivePhoneHeader(preview, onBackClick, onPlay = { preview?.let { onChannelPlay(it) } })
-                LazyColumn(
-                    contentPadding = PaddingValues(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    itemsIndexed(movies) { i, m ->
-                        ChannelRow(m, i + 1, m.id == preview?.id, ad,
-                            onHover = { preview = m }, onSelect = { onChannelPlay(m) })
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LivePhoneHeader(movie: MovieResponse?, onBackClick: () -> Unit, onPlay: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(200.dp)) {
-        AsyncImage(movie?.bannerUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        Box(Modifier.fillMaxSize().background(DarkBackground.copy(0.6f)))
-        Box(Modifier.fillMaxSize().background(
-            Brush.verticalGradient(listOf(Color.Transparent, DarkBackground), startY = 80f)
-        ))
-
-        Row(
-            Modifier.align(Alignment.TopStart).padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            BackBtn(onBackClick)
-            Text("LIVE TV", fontSize = sp(16), fontWeight = FontWeight.Black,
-                color = White, letterSpacing = sp(2))
-            LiveDot()
-        }
-
-        if (movie != null) {
-            Row(
-                Modifier.align(Alignment.BottomStart).padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(movie.title, fontSize = sp(20), fontWeight = FontWeight.Black, color = White, maxLines = 1)
-                    movie.genreNames().let { if (it.isNotEmpty()) Text(it, fontSize = sp(12), color = LightGray) }
-                }
-                Box(
-                    Modifier.clip(RoundedCornerShape(6.dp)).background(NetflixRed)
-                        .clickable { onPlay() }.padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Icon(Icons.Default.PlayArrow, null, tint = White, modifier = Modifier.size(16.dp))
-                        Text("Watch", fontSize = sp(13), fontWeight = FontWeight.Bold, color = White)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LiveChannelPanel(
-    movies: List<MovieResponse>, selected: MovieResponse?,
-    ad: Adaptive, onBackClick: () -> Unit,
-    onHover: (MovieResponse) -> Unit, onSelect: (MovieResponse) -> Unit
-) {
-    Column(
-        modifier = Modifier.width(if (ad.isTV) 400.dp else 300.dp)
-            .fillMaxHeight().background(Color(0xFF0D0D0D))
-    ) {
-        // Header
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                BackBtn(onBackClick)
-                Column {
-                    Text("SUNE", fontSize = sp(20), fontWeight = FontWeight.Black, color = NetflixRed, letterSpacing = sp(3))
-                    Text("Live TV", fontSize = sp(12), color = LightGray)
-                }
-            }
-            LiveDot()
-        }
-        Divider(color = White.copy(0.07f))
-        Text("${movies.size} CHANNELS", fontSize = sp(10), fontWeight = FontWeight.Bold,
-            color = LightGray.copy(0.4f), letterSpacing = sp(2),
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
-
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            itemsIndexed(movies) { i, m ->
-                ChannelRow(m, i + 1, m.id == selected?.id, ad,
-                    onHover = { onHover(m) }, onSelect = { onSelect(m) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChannelRow(
-    movie: MovieResponse, idx: Int, isSelected: Boolean, ad: Adaptive,
-    onHover: () -> Unit, onSelect: () -> Unit
-) {
-    var focused by remember { mutableStateOf(false) }
-    LaunchedEffect(focused) { if (focused) onHover() }
-
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(when { isSelected -> NetflixRed.copy(0.16f); focused -> White.copy(0.05f); else -> Color.Transparent })
-            .border(if (isSelected) 1.dp else 0.dp,
-                if (isSelected) NetflixRed.copy(0.45f) else Color.Transparent, RoundedCornerShape(8.dp))
-            .clickable { onSelect() }
-            .onFocusChanged { focused = it.isFocused }
-            .padding(9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp)
-    ) {
-        Text(String.format("%02d", idx), fontSize = sp(11), fontWeight = FontWeight.Bold,
-            color = if (isSelected) NetflixRed else LightGray.copy(0.35f),
-            modifier = Modifier.width(22.dp))
-        val thumbW = if (ad.isTV) 62.dp else 50.dp
-        val thumbH = if (ad.isTV) 40.dp else 33.dp
-        Box(Modifier.size(thumbW, thumbH).clip(RoundedCornerShape(5.dp)).background(CardBackground)) {
-            AsyncImage(movie.thumbnailUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            if (isSelected) {
-                Box(Modifier.fillMaxSize().background(NetflixRed.copy(0.4f)), Alignment.Center) {
-                    Icon(Icons.Default.PlayArrow, null, tint = White, modifier = Modifier.size(14.dp))
-                }
-            }
-        }
-        Column(Modifier.weight(1f)) {
-            Text(movie.title, fontSize = if (ad.isTV) sp(14) else sp(13),
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isSelected) White else White.copy(0.82f),
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(movie.genreNames().ifEmpty { "Movie" }, fontSize = sp(11),
-                color = if (isSelected) NetflixRed.copy(0.75f) else LightGray.copy(0.45f))
-        }
-        Box(Modifier.size(7.dp).clip(CircleShape)
-            .background(if (isSelected) NetflixRed else LightGray.copy(0.25f)))
-    }
-}
-
-@Composable
-private fun LivePreviewPanel(movie: MovieResponse?, ad: Adaptive, onPlay: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(DarkBackground)) {
-        if (movie == null) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) {
-                Text("Select a channel", fontSize = sp(18), color = LightGray.copy(0.5f))
-            }; return@Box
-        }
-        AsyncImage(movie.bannerUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        Box(Modifier.fillMaxSize().background(
-            Brush.horizontalGradient(listOf(DarkBackground.copy(0.75f), Color.Transparent), 0f, 200f)
-        ))
-        Box(Modifier.fillMaxSize().background(DarkBackground.copy(0.42f)))
-
-        Column(
-            modifier = Modifier.align(Alignment.Center).padding(40.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                Modifier.clip(RoundedCornerShape(6.dp)).background(NetflixRed)
-                    .padding(horizontal = 14.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(White))
-                Text("LIVE", fontSize = sp(12), fontWeight = FontWeight.Black, color = White, letterSpacing = sp(2))
-            }
-            Text(movie.title, fontSize = ad.heroTitle * 0.88f, fontWeight = FontWeight.Black,
-                color = White, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (movie.genreNames().isNotEmpty())
-                Text(movie.genreNames().uppercase(), fontSize = sp(12), color = NetflixRed,
-                    fontWeight = FontWeight.Bold, letterSpacing = sp(2))
-            movie.description?.let {
-                Text(it, fontSize = ad.body, color = White.copy(0.68f), textAlign = TextAlign.Center,
-                    maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 420.dp))
-            }
-            Spacer(Modifier.height(6.dp))
-            var focused by remember { mutableStateOf(false) }
-            val scale by animateFloatAsState(if (focused) 1.05f else 1f, spring())
-            Row(
-                modifier = Modifier.scale(scale)
-                    .clip(RoundedCornerShape(8.dp)).background(NetflixRed)
-                    .clickable { onPlay() }.onFocusChanged { focused = it.isFocused }
-                    .padding(horizontal = 36.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(Icons.Default.PlayArrow, null, tint = White, modifier = Modifier.size(26.dp))
-                Text("Watch Now", fontSize = sp(16), fontWeight = FontWeight.Bold, color = White)
-            }
-        }
-    }
-}
 
 @Composable
 fun LiveDot() {

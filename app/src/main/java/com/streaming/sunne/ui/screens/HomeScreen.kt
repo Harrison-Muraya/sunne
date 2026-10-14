@@ -22,8 +22,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import coil.compose.AsyncImage
-import com.streaming.sunne.data.model.MovieCategory
+import com.streaming.sunne.data.model.CONTINUE_WATCHING
+import com.streaming.sunne.data.model.ContentItem
+import com.streaming.sunne.data.model.ContentRow
 import com.streaming.sunne.data.model.MovieResponse
 import com.streaming.sunne.ui.adaptive.*
 import com.streaming.sunne.ui.theme.*
@@ -38,17 +41,32 @@ import com.streaming.sunne.viewmodel.MovieViewModel
 fun HomeScreen(
     viewModel:     MovieViewModel,
     authViewModel: AuthViewModel,
-    onMovieClick:  (MovieResponse) -> Unit,
+    onItemClick:   (ContentItem) -> Unit,
+    onPlayMovie:   (MovieResponse) -> Unit,
     onLiveClick:   () -> Unit,
     onLogout:      () -> Unit
 ) {
     val state    by viewModel.homeState.collectAsState()
     val user     by authViewModel.currentUser.collectAsState()
+    val opening  by viewModel.opening.collectAsState()
+    val openError by viewModel.openError.collectAsState()
     val adaptive  = rememberAdaptive()
-    var activeNav        by remember { mutableStateOf("Home") }
+    var activeNav        by rememberSaveable { mutableStateOf("Home") }
     var showProfileMenu  by remember { mutableStateOf(false) }
 
-    val navItems = listOf("Home", "Movies", "Live")
+    val navItems = listOf("Home", "Movies", "Series", "Live")
+    val selectNav: (String) -> Unit = { item ->
+        if (item == "Live") onLiveClick() else activeNav = item
+    }
+
+    LaunchedEffect(Unit) { viewModel.ensureHomeLoaded() }
+
+    // Keep Continue Watching fresh after returning from a player
+    OnResumeEffect(Unit, skipFirst = true) { viewModel.refreshContinueWatching() }
+
+    LaunchedEffect(openError) {
+        if (openError != null) { kotlinx.coroutines.delay(3_500); viewModel.clearOpenError() }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
 
@@ -62,10 +80,7 @@ fun HomeScreen(
                     activeNav     = activeNav,
                     adaptive      = adaptive,
                     username      = user?.username ?: "A",
-                    onNavSelected = { item ->
-                        activeNav = item
-                        if (item == "Live") onLiveClick()
-                    },
+                    onNavSelected = selectNav,
                     onProfileClick = { showProfileMenu = true }
                 )
             }
@@ -75,36 +90,43 @@ fun HomeScreen(
                 is HomeUiState.Loading -> HomeLoadingScreen()
                 is HomeUiState.Error   -> HomeErrorScreen(s.message, viewModel::retry)
                 is HomeUiState.Success -> {
-                    val categories = s.categories
-                    val hero = categories.firstOrNull()?.items?.firstOrNull()?.let { item ->
-                        when (item) {
-                            is com.streaming.sunne.data.model.ContentItem.Movie -> item.data
-                            else -> null
-                        }
-                    }
+                    val categories = remember(s.categories, activeNav) { filterRows(s.categories, activeNav) }
+                    val hero = if (activeNav == "Series") null else categories
+                        .filter { it.label != CONTINUE_WATCHING }
+                        .flatMap { it.items }
+                        .firstNotNullOfOrNull { (it as? ContentItem.Movie)?.data }
 
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        // Hero banner
                         if (hero != null) {
                             HeroBanner(
                                 movie         = hero,
                                 adaptive      = adaptive,
                                 username      = user?.username ?: "A",
                                 showPhoneBar  = adaptive.useBottomNav,
-                                onPlayClick   = { onMovieClick(hero) },
+                                onPlayClick   = { onPlayMovie(hero) },
+                                onInfoClick   = { onItemClick(ContentItem.Movie(hero)) },
                                 onProfileClick = { showProfileMenu = true }
                             )
+                        } else if (adaptive.useBottomNav) {
+                            PhoneTopBar(adaptive, user?.username ?: "A") { showProfileMenu = true }
                         }
 
                         Spacer(Modifier.height(adaptive.rowGap))
 
-                        // Content rows
+                        if (categories.isEmpty()) {
+                            Text(
+                                if (activeNav == "Series") "No series yet. Check back soon." else "Nothing here yet.",
+                                fontSize = sp(15), color = LightGray,
+                                modifier = Modifier.padding(horizontal = adaptive.pad, vertical = 32.dp)
+                            )
+                        }
+
                         categories.forEach { cat ->
-                            CategoryRow(cat, adaptive, onMovieClick)
+                            CategoryRow(cat, adaptive, onItemClick)
                             Spacer(Modifier.height(adaptive.rowGap))
                         }
 
@@ -121,11 +143,30 @@ fun HomeScreen(
                 modifier  = Modifier.align(Alignment.BottomCenter),
                 navItems  = navItems,
                 activeNav = activeNav,
-                onSelect  = { item ->
-                    activeNav = item
-                    if (item == "Live") onLiveClick()
-                }
+                onSelect  = selectNav
             )
+        }
+
+        if (opening != null) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = NetflixRed, modifier = Modifier.size(48.dp))
+            }
+        }
+
+        openError?.let { message ->
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (adaptive.useBottomNav) 76.dp else 32.dp, start = 16.dp, end = 16.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF2A2A2A))
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(message, fontSize = sp(13), color = White)
+            }
         }
 
         // ── Profile dropdown ──────────────────────────────────────────────
@@ -141,11 +182,39 @@ fun HomeScreen(
                 onDismiss = { showProfileMenu = false },
                 onLogout  = {
                     showProfileMenu = false
-                    authViewModel.logout()
                     onLogout()
                 }
             )
         }
+    }
+}
+
+/** Home tab shows everything; Movies / Series tabs keep only rows (and items) of that type. */
+private fun filterRows(rows: List<ContentRow>, tab: String): List<ContentRow> = when (tab) {
+    "Movies" -> rows.mapNotNull { row ->
+        row.items.filterIsInstance<ContentItem.Movie>().takeIf { it.isNotEmpty() }?.let { ContentRow(row.label, it) }
+    }
+    "Series" -> rows.mapNotNull { row ->
+        row.items.filter { it is ContentItem.Series || it is ContentItem.ContinueSeries }
+            .takeIf { it.isNotEmpty() }?.let { ContentRow(row.label, it) }
+    }
+    else -> rows
+}
+
+@Composable
+private fun PhoneTopBar(adaptive: Adaptive, username: String, onProfileClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = adaptive.pad, vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Text("SUNE", fontSize = adaptive.logo, fontWeight = FontWeight.Black,
+            color = NetflixRed, letterSpacing = sp(4))
+        Avatar(
+            letter  = username.firstOrNull()?.uppercaseChar()?.toString() ?: "A",
+            size    = 32.dp,
+            onClick = onProfileClick
+        )
     }
 }
 
@@ -198,22 +267,11 @@ private fun TvTopBar(
 
         Spacer(Modifier.weight(1f))
 
-        // Right icons
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Search, "Search",
-                tint     = White,
-                modifier = Modifier.size(24.dp).clickable {}
-            )
-            Avatar(
-                letter  = username.first().uppercaseChar().toString(),
-                size    = 38.dp,
-                onClick = onProfileClick
-            )
-        }
+        Avatar(
+            letter  = username.firstOrNull()?.uppercaseChar()?.toString() ?: "A",
+            size    = 38.dp,
+            onClick = onProfileClick
+        )
     }
 }
 
@@ -257,6 +315,7 @@ private fun PhoneBottomNav(
     val iconMap = mapOf(
         "Home"   to Icons.Default.Home,
         "Movies" to Icons.Default.Movie,
+        "Series" to Icons.Default.VideoLibrary,
         "Live"   to Icons.Default.LiveTv
     )
     Row(
@@ -318,6 +377,7 @@ private fun HeroBanner(
     username: String,
     showPhoneBar: Boolean,
     onPlayClick: () -> Unit,
+    onInfoClick: () -> Unit,
     onProfileClick: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxWidth().height(adaptive.bannerH)) {
@@ -430,7 +490,7 @@ private fun HeroBanner(
             // Buttons
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HeroPlayButton(onClick = onPlayClick, adaptive = adaptive)
-                if (!adaptive.isPhone) HeroInfoButton(adaptive)
+                HeroInfoButton(onClick = onInfoClick, adaptive = adaptive)
             }
         }
     }
@@ -462,18 +522,23 @@ private fun HeroPlayButton(onClick: () -> Unit, adaptive: Adaptive) {
 }
 
 @Composable
-private fun HeroInfoButton(adaptive: Adaptive) {
+private fun HeroInfoButton(onClick: () -> Unit, adaptive: Adaptive) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(White.copy(alpha = 0.18f))
-            .clickable {}
-            .padding(horizontal = 22.dp, vertical = 12.dp),
+            .clickable { onClick() }
+            .padding(
+                horizontal = if (adaptive.isPhone) 16.dp else 22.dp,
+                vertical   = if (adaptive.isPhone) 9.dp  else 12.dp
+            ),
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Icon(Icons.Default.Info, null, tint = White, modifier = Modifier.size(20.dp))
-        Text("Info", fontSize = sp(16), fontWeight = FontWeight.SemiBold, color = White)
+        Icon(Icons.Default.Info, null, tint = White,
+            modifier = Modifier.size(if (adaptive.isPhone) 16.dp else 20.dp))
+        Text("Info", fontSize = if (adaptive.isPhone) sp(14) else sp(16),
+            fontWeight = FontWeight.SemiBold, color = White)
     }
 }
 
@@ -481,33 +546,57 @@ private fun HeroInfoButton(adaptive: Adaptive) {
 //  Category Row + Card
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
-fun CategoryRow(category: com.streaming.sunne.data.model.ContentRow, adaptive: Adaptive, onMovieClick: (MovieResponse) -> Unit) {
+fun CategoryRow(category: ContentRow, adaptive: Adaptive, onItemClick: (ContentItem) -> Unit) {
     Column {
-        Row(
-            modifier              = Modifier.padding(horizontal = adaptive.pad).fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            Text(category.label, fontSize = adaptive.sectionTitle, fontWeight = FontWeight.Bold, color = White)
-            Text("See all ›", fontSize = sp(13), color = NetflixRed, modifier = Modifier.clickable {})
-        }
+        Text(
+            category.label,
+            fontSize   = adaptive.sectionTitle,
+            fontWeight = FontWeight.Bold,
+            color      = White,
+            modifier   = Modifier.padding(horizontal = adaptive.pad)
+        )
         Spacer(Modifier.height(10.dp))
         LazyRow(
             contentPadding        = PaddingValues(horizontal = adaptive.pad),
             horizontalArrangement = Arrangement.spacedBy(adaptive.cardGap)
         ) {
             items(category.items) { item ->
+                val onClick = { onItemClick(item) }
                 when (item) {
-                    is com.streaming.sunne.data.model.ContentItem.Movie -> {
-                        MovieCard(item.data, adaptive) { onMovieClick(item.data) }
-                    }
-                    is com.streaming.sunne.data.model.ContentItem.Series -> {
-                        // For now, show series as cards too (skip or implement SeriesCard later)
-                        // MovieCard works because Series has similar properties
-                    }
-                    is com.streaming.sunne.data.model.ContentItem.LiveStream -> {
-                        // Skip live streams in regular rows or implement LiveCard
-                    }
+                    is ContentItem.Movie -> PosterCard(
+                        title    = item.data.title,
+                        imageUrl = item.data.thumbnailUrl,
+                        subtitle = item.data.formattedDuration(),
+                        badge    = if (item.data.isTrending && item.progress == null) "HOT" else null,
+                        progress = item.progress,
+                        adaptive = adaptive,
+                        onClick  = onClick
+                    )
+                    is ContentItem.Series -> PosterCard(
+                        title    = item.data.title,
+                        imageUrl = item.data.thumbnailUrl,
+                        subtitle = item.data.seasons.takeIf { it.isNotEmpty() }?.let { item.data.formattedSeasonCount() } ?: "Series",
+                        badge    = "SERIES",
+                        adaptive = adaptive,
+                        onClick  = onClick
+                    )
+                    is ContentItem.ContinueSeries -> PosterCard(
+                        title    = item.data.seriesTitle,
+                        imageUrl = item.data.seriesBackdrop ?: item.data.seriesPoster,
+                        subtitle = item.data.resumeEpisodeTitle?.let { "${item.data.episodeLabel} · $it" } ?: item.data.episodeLabel,
+                        progress = item.data.watchPercentage / 100f,
+                        adaptive = adaptive,
+                        onClick  = onClick
+                    )
+                    is ContentItem.LiveStream -> PosterCard(
+                        title      = item.data.title,
+                        imageUrl   = item.data.thumbnailUrl,
+                        subtitle   = "${item.data.formattedViewerCount()} watching",
+                        badge      = "LIVE",
+                        badgeColor = NetflixRed,
+                        adaptive   = adaptive,
+                        onClick    = onClick
+                    )
                 }
             }
         }
@@ -515,7 +604,16 @@ fun CategoryRow(category: com.streaming.sunne.data.model.ContentRow, adaptive: A
 }
 
 @Composable
-private fun MovieCard(movie: MovieResponse, adaptive: Adaptive, onClick: () -> Unit) {
+private fun PosterCard(
+    title: String,
+    imageUrl: String?,
+    subtitle: String?,
+    adaptive: Adaptive,
+    onClick: () -> Unit,
+    badge: String? = null,
+    badgeColor: Color = Color(0xFFE55300),
+    progress: Float? = null
+) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         if (focused) 1.08f else 1f,
@@ -531,14 +629,14 @@ private fun MovieCard(movie: MovieResponse, adaptive: Adaptive, onClick: () -> U
                 color = if (focused) NetflixRed else Color.Transparent,
                 shape = RoundedCornerShape(8.dp)
             )
-            .clickable { onClick() }
             .onFocusChanged { focused = it.isFocused }
+            .clickable { onClick() }
     ) {
         // Thumbnail
         AsyncImage(
-            model              = movie.thumbnailUrl,
-            contentDescription = movie.title,
-            modifier           = Modifier.fillMaxWidth().height(adaptive.cardH),
+            model              = imageUrl,
+            contentDescription = title,
+            modifier           = Modifier.fillMaxWidth().height(adaptive.cardH).background(CardBackground),
             contentScale       = ContentScale.Crop
         )
         // Bottom gradient
@@ -554,24 +652,33 @@ private fun MovieCard(movie: MovieResponse, adaptive: Adaptive, onClick: () -> U
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
                 .background(CardBackground)
-                .padding(horizontal = 8.dp, vertical = 5.dp)
         ) {
-            Text(movie.title, fontSize = adaptive.caption, fontWeight = FontWeight.SemiBold,
-                color = White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            movie.formattedDuration()?.let {
-                Text(it, fontSize = sp(10), color = LightGray)
+            progress?.let { WatchProgressBar(it) }
+            Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+                Text(title, fontSize = adaptive.caption, fontWeight = FontWeight.SemiBold,
+                    color = White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                subtitle?.let {
+                    Text(it, fontSize = sp(10), color = LightGray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
-        // HOT badge
-        if (movie.isTrending) {
+        badge?.let {
             Box(
                 modifier = Modifier.align(Alignment.TopStart).padding(6.dp)
-                    .clip(RoundedCornerShape(4.dp)).background(Color(0xFFE55300))
+                    .clip(RoundedCornerShape(4.dp)).background(badgeColor)
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
-                Text("HOT", fontSize = sp(9), fontWeight = FontWeight.Black, color = White)
+                Text(it, fontSize = sp(9), fontWeight = FontWeight.Black, color = White)
             }
         }
+    }
+}
+
+/** Thin red bar showing how much of a title has been watched (0..1). */
+@Composable
+fun WatchProgressBar(fraction: Float, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(3.dp).background(White.copy(alpha = 0.2f))) {
+        Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight().background(NetflixRed))
     }
 }
 

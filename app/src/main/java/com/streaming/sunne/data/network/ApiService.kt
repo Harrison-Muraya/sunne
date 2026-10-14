@@ -149,7 +149,7 @@ interface ApiService {
     suspend fun deleteHistoryItem(@Path("movie_id") movieId: Int): Response<Unit>
 
     @GET("api/v1/watch/continue-watching")
-    suspend fun getContinueWatching(@Query("limit") limit: Int = 10): Response<List<WatchHistoryResponse>>
+    suspend fun getContinueWatching(@Query("limit") limit: Int = 10): Response<List<ContinueWatchingMovie>>
 
     // ══════════════════════════════════════════════════════════════════════════
     //  MOVIE RATINGS
@@ -216,6 +216,12 @@ interface ApiService {
     @GET("api/v1/series/{series_id}")
     suspend fun getSeries(@Path("series_id") seriesId: Int): Response<SeriesResponse>
 
+    @GET("api/v1/series/episodes/{episode_id}/stream")
+    suspend fun getEpisodeStreamUrl(
+        @Path("episode_id") episodeId: Int,
+        @Query("quality")   quality: String = "1080p"
+    ): Response<Map<String, Any>>
+
     // ══════════════════════════════════════════════════════════════════════════
     //  EPISODE WATCH HISTORY
     // ══════════════════════════════════════════════════════════════════════════
@@ -227,10 +233,10 @@ interface ApiService {
     suspend fun getEpisodeProgress(@Path("episode_id") episodeId: Int): Response<EpisodeProgressResponse?>
 
     @GET("api/v1/series-watch/series/{series_id}/progress")
-    suspend fun getSeriesProgress(@Path("series_id") seriesId: Int): Response<Map<String, Any>>
+    suspend fun getSeriesProgress(@Path("series_id") seriesId: Int): Response<List<EpisodeProgressItem>>
 
     @GET("api/v1/series-watch/continue-watching")
-    suspend fun getContinueWatchingSeries(@Query("limit") limit: Int = 10): Response<List<Map<String, Any>>>
+    suspend fun getContinueWatchingSeries(@Query("limit") limit: Int = 10): Response<List<SeriesContinueWatching>>
 
     // ══════════════════════════════════════════════════════════════════════════
     //  SERIES RATINGS
@@ -247,10 +253,10 @@ interface ApiService {
     // ══════════════════════════════════════════════════════════════════════════
 
     @GET("api/v1/series-watch/play-next/episode/{episode_id}")
-    suspend fun getPlayNextAfterEpisode(@Path("episode_id") episodeId: Int): Response<Map<String, Any>>
+    suspend fun getPlayNextAfterEpisode(@Path("episode_id") episodeId: Int): Response<PlayNextResponse>
 
     @GET("api/v1/series-watch/play-next/movie/{movie_id}")
-    suspend fun getPlayNextAfterMovie(@Path("movie_id") movieId: Int): Response<Map<String, Any>>
+    suspend fun getPlayNextAfterMovie(@Path("movie_id") movieId: Int): Response<PlayNextResponse>
 
     // ══════════════════════════════════════════════════════════════════════════
     //  UNIFIED RECOMMENDATIONS (MOVIES + SERIES)

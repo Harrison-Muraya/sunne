@@ -30,8 +30,9 @@ class AuthInterceptor : Interceptor {
                 // Retry original request with new token
                 chain.proceed(chain.request().withBearerToken(TokenManager.accessToken))
             } else {
-                // Refresh failed — clear tokens and return original 401
+                // Refresh failed — clear tokens, send the user back to Login, return the 401
                 TokenManager.clear()
+                SessionEvents.notifyExpired()
                 chain.proceed(chain.request())
             }
         }
@@ -82,7 +83,7 @@ object RetrofitClient {
     // Android emulator  → "http://10.0.2.2:8000/"
     // Physical device   → "http://192.168.1.XXX:8000/"
     // Production        → "https://api.sunetv.com/"
-    const val BASE_URL = "http://192.168.100.54/"
+    const val BASE_URL = "http://197.248.201.233:30000/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

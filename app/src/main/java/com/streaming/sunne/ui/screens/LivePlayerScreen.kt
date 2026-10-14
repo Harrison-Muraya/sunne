@@ -2,8 +2,10 @@ package com.streaming.sunne.ui.screens
 
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
@@ -13,19 +15,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
+import com.google.android.exoplayer2.PlaybackException
+import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.ui.PlayerView
 import com.streaming.sunne.data.model.LiveStreamPublicResponse
 import com.streaming.sunne.ui.theme.DarkBackground
 import com.streaming.sunne.ui.theme.NetflixRed
 import com.streaming.sunne.ui.theme.White
 import com.streaming.sunne.viewmodel.LiveStreamViewModel
-import androidx.compose.animation.core.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+
+private const val VIEWER_POLL_MS = 15_000L
 
 @Composable
 fun LivePlayerScreen(
@@ -34,378 +42,138 @@ fun LivePlayerScreen(
     onBackPress: () -> Unit
 ) {
     val context = LocalContext.current
-    var viewerCount by remember { mutableStateOf(stream.viewerCount) }
+    val url = stream.streamUrl
+    val viewerCount by viewModel.viewerCount.collectAsState()
 
-    val player = remember {
-        ExoPlayer.Builder(context).build().apply {
-            stream.streamUrl?.let { url ->
-                setMediaItem(MediaItem.fromUri(url))
-                prepare()
-                playWhenReady = true
-            }
-        }
-    }
+    var attempt by remember { mutableStateOf(0) }
+    var isBuffering by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Join stream on entry
-    LaunchedEffect(stream.id) {
-        viewModel.joinStream(stream.id)
-    }
+    BackHandler { onBackPress() }
 
-    // Poll viewer count every 10 seconds
+    LaunchedEffect(stream.id) { viewModel.joinStream(stream.id) }
+
     LaunchedEffect(stream.id) {
         while (isActive) {
-            delay(10_000)
-            // Optionally re-fetch stream to get updated viewer count
-            // For now just keep the initial count
+            viewModel.refreshViewerCount(stream.id)
+            delay(VIEWER_POLL_MS)
         }
     }
 
-    // Leave stream on exit
     DisposableEffect(stream.id) {
-        onDispose {
-            viewModel.leaveStream(stream.id)
-            player.release()
-        }
+        onDispose { viewModel.leaveStream(stream.id) }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
-        // ExoPlayer
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    this.player = player
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    useController = true
-                    setShowNextButton(false)
-                    setShowPreviousButton(false)
+    Box(Modifier.fillMaxSize().background(DarkBackground)) {
+        if (url.isNullOrBlank() || !stream.isLive) {
+            PlayerErrorPanel(
+                title   = stream.title,
+                message = if (stream.isLive) "This stream isn't available right now." else "This stream has ended.",
+                onRetry = onBackPress,
+                onBack  = null
+            )
+        } else {
+            val player = remember(url, attempt) {
+                ExoPlayer.Builder(context).build().apply {
+                    setMediaItem(MediaItem.fromUri(url))
+                    prepare()
+                    playWhenReady = true
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+            }
 
-        // Live indicator overlay (top-left)
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(20.dp)
-                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            // Pulsing dot
-            val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "dot")
-            val alpha by inf.animateFloat(
-                0.5f, 1f,
-                androidx.compose.animation.core.infiniteRepeatable(
-                    androidx.compose.animation.core.tween(700),
-                    androidx.compose.animation.core.RepeatMode.Reverse
-                ),
-                "a"
+            DisposableEffect(player) {
+                val listener = object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        isBuffering = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
+                        if (state == Player.STATE_READY) errorMessage = null
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        isBuffering = false
+                        errorMessage = playbackErrorMessage(error)
+                    }
+                }
+                player.addListener(listener)
+                onDispose {
+                    player.removeListener(listener)
+                    player.release()
+                }
+            }
+
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        useController = true
+                        setShowNextButton(false)
+                        setShowPreviousButton(false)
+                    }
+                },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxSize()
             )
-            Box(
-                Modifier.size(8.dp)
-                    .background(NetflixRed.copy(alpha), androidx.compose.foundation.shape.CircleShape)
-            )
-            Text("LIVE", fontSize = sp(12),
-                fontWeight = FontWeight.Black, color = White)
+
+            if (isBuffering && errorMessage == null) {
+                CircularProgressIndicator(color = NetflixRed, modifier = Modifier.align(Alignment.Center).size(56.dp))
+            }
+
+            errorMessage?.let { message ->
+                PlayerErrorPanel(
+                    title   = stream.title,
+                    message = message,
+                    onRetry = {
+                        errorMessage = null
+                        isBuffering = true
+                        attempt++
+                    },
+                    onBack  = onBackPress
+                )
+            }
         }
 
-        // Viewer count (top-right)
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(20.dp)
-                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
-            Text(
-                stream.formattedViewerCount(),
-                fontSize = sp(12),
-                color = White
-            )
+        if (errorMessage == null) {
+            Row(
+                modifier = Modifier.align(Alignment.TopStart).padding(end = 160.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PlayerBackButton(onBackPress)
+                LiveDot()
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    stream.title,
+                    color = White,
+                    fontSize = TextUnit(15f, TextUnitType.Sp),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(20.dp)
+                    .background(Color.Black.copy(0.7f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
+                Text(
+                    formatViewers(viewerCount ?: stream.viewerCount),
+                    fontSize = TextUnit(12f, TextUnitType.Sp),
+                    color = White
+                )
+            }
         }
     }
 }
 
-private fun sp(value: Float) = androidx.compose.ui.unit.TextUnit(value, androidx.compose.ui.unit.TextUnitType.Sp)
-private fun sp(value: Int) = sp(value.toFloat())
-
-
-//package com.streaming.sunne.ui.screens
-//
-//import android.view.ViewGroup
-//import android.widget.FrameLayout
-//import androidx.compose.foundation.background
-//import androidx.compose.foundation.layout.*
-//import androidx.compose.material.*
-//import androidx.compose.material.icons.Icons
-//import androidx.compose.material.icons.filled.Visibility
-//import androidx.compose.runtime.*
-//import androidx.compose.ui.Alignment
-//import androidx.compose.ui.Modifier
-//import androidx.compose.ui.graphics.Color
-//import androidx.compose.ui.platform.LocalContext
-//import androidx.compose.ui.text.font.FontWeight
-//import androidx.compose.ui.unit.dp
-//import androidx.compose.ui.viewinterop.AndroidView
-//import com.google.android.exoplayer2.ExoPlayer
-//import com.google.android.exoplayer2.MediaItem
-//import com.google.android.exoplayer2.ui.PlayerView
-//import com.streaming.sunne.data.model.LiveStreamPublicResponse
-//import com.streaming.sunne.ui.theme.DarkBackground
-//import com.streaming.sunne.ui.theme.NetflixRed
-//import com.streaming.sunne.ui.theme.White
-//import com.streaming.sunne.viewmodel.LiveStreamViewModel
-//import androidx.compose.animation.core.*
-//import kotlinx.coroutines.delay
-//import kotlinx.coroutines.isActive
-//import androidx.compose.ui.unit.sp
-//
-//@Composable
-//fun LivePlayerScreen(
-//    stream: LiveStreamPublicResponse,
-//    viewModel: LiveStreamViewModel,
-//    onBackPress: () -> Unit
-//) {
-//    val context = LocalContext.current
-//    var viewerCount by remember { mutableStateOf(stream.viewerCount) }
-//
-//    val player = remember {
-//        ExoPlayer.Builder(context).build().apply {
-//            stream.streamUrl?.let { url ->
-//                setMediaItem(MediaItem.fromUri(url))
-//                prepare()
-//                playWhenReady = true
-//            }
-//        }
-//    }
-//
-//    // Join stream on entry
-//    LaunchedEffect(stream.id) {
-//        viewModel.joinStream(stream.id)
-//    }
-//
-//    // Poll viewer count every 10 seconds
-//    LaunchedEffect(stream.id) {
-//        while (isActive) {
-//            delay(10_000)
-//            // Optionally re-fetch stream to get updated viewer count
-//            // For now just keep the initial count
-//        }
-//    }
-//
-//    // Leave stream on exit
-//    DisposableEffect(stream.id) {
-//        onDispose {
-//            viewModel.leaveStream(stream.id)
-//            player.release()
-//        }
-//    }
-//
-//    Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
-//        // ExoPlayer
-//        AndroidView(
-//            factory = { ctx ->
-//                PlayerView(ctx).apply {
-//                    this.player = player
-//                    layoutParams = FrameLayout.LayoutParams(
-//                        ViewGroup.LayoutParams.MATCH_PARENT,
-//                        ViewGroup.LayoutParams.MATCH_PARENT
-//                    )
-//                    useController = true
-//                    setShowNextButton(false)
-//                    setShowPreviousButton(false)
-//                }
-//            },
-//            modifier = Modifier.fillMaxSize()
-//        )
-//
-//        // Live indicator overlay (top-left)
-//        Row(
-//            modifier = Modifier
-//                .align(Alignment.TopStart)
-//                .padding(20.dp)
-//                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-//                .padding(horizontal = 12.dp, vertical = 6.dp),
-//            verticalAlignment = Alignment.CenterVertically,
-//            horizontalArrangement = Arrangement.spacedBy(6.dp)
-//        ) {
-//            // Pulsing dot
-//            val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "dot")
-//            val alpha by inf.animateFloat(
-//                0.5f, 1f,
-//                androidx.compose.animation.core.infiniteRepeatable(
-//                    androidx.compose.animation.core.tween(700),
-//                    androidx.compose.animation.core.RepeatMode.Reverse
-//                ),
-//                "a"
-//            )
-//            Box(
-//                Modifier.size(8.dp)
-//                    .background(NetflixRed.copy(alpha), androidx.compose.foundation.shape.CircleShape)
-//            )
-//            Text("LIVE", fontSize = androidx.compose.ui.unit.sp(12),
-//                fontWeight = FontWeight.Black, color = White)
-//        }
-//
-//        // Viewer count (top-right)
-//        Row(
-//            modifier = Modifier
-//                .align(Alignment.TopEnd)
-//                .padding(20.dp)
-//                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-//                .padding(horizontal = 12.dp, vertical = 6.dp),
-//            verticalAlignment = Alignment.CenterVertically,
-//            horizontalArrangement = Arrangement.spacedBy(6.dp)
-//        ) {
-//            Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
-//            Text(
-//                stream.formattedViewerCount(),
-//                fontSize = androidx.compose.ui.unit.sp(12),
-//                color = White
-//            )
-//        }
-//    }
-//}
-//
-////package com.streaming.sunne.ui.screens
-////
-////import android.view.ViewGroup
-////import android.widget.FrameLayout
-////import androidx.compose.foundation.background
-////import androidx.compose.foundation.layout.*
-////import androidx.compose.material.*
-////import androidx.compose.material.icons.Icons
-////import androidx.compose.material.icons.filled.Visibility
-////import androidx.compose.runtime.*
-////import androidx.compose.ui.Alignment
-////import androidx.compose.ui.Modifier
-////import androidx.compose.ui.graphics.Color
-////import androidx.compose.ui.platform.LocalContext
-////import androidx.compose.ui.text.font.FontWeight
-////import androidx.compose.ui.unit.dp
-////import androidx.compose.ui.viewinterop.AndroidView
-////import com.google.android.exoplayer2.ExoPlayer
-////import com.google.android.exoplayer2.MediaItem
-////import com.google.android.exoplayer2.ui.PlayerView
-////import com.streaming.sunne.data.model.LiveStreamPublicResponse
-////import com.streaming.sunne.ui.theme.DarkBackground
-////import com.streaming.sunne.ui.theme.NetflixRed
-////import com.streaming.sunne.ui.theme.White
-////import com.streaming.sunne.viewmodel.LiveStreamViewModel
-////import kotlinx.coroutines.delay
-////import kotlinx.coroutines.isActive
-////
-////@Composable
-////fun LivePlayerScreen(
-////    stream: LiveStreamPublicResponse,
-////    viewModel: LiveStreamViewModel,
-////    onBackPress: () -> Unit
-////) {
-////    val context = LocalContext.current
-////    var viewerCount by remember { mutableStateOf(stream.viewerCount) }
-////
-////    val player = remember {
-////        ExoPlayer.Builder(context).build().apply {
-////            stream.streamUrl?.let { url ->
-////                setMediaItem(MediaItem.fromUri(url))
-////                prepare()
-////                playWhenReady = true
-////            }
-////        }
-////    }
-////
-////    // Join stream on entry
-////    LaunchedEffect(stream.id) {
-////        viewModel.joinStream(stream.id)
-////    }
-////
-////    // Poll viewer count every 10 seconds
-////    LaunchedEffect(stream.id) {
-////        while (isActive) {
-////            delay(10_000)
-////            // Optionally re-fetch stream to get updated viewer count
-////            // For now just keep the initial count
-////        }
-////    }
-////
-////    // Leave stream on exit
-////    DisposableEffect(stream.id) {
-////        onDispose {
-////            viewModel.leaveStream(stream.id)
-////            player.release()
-////        }
-////    }
-////
-////    Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
-////        // ExoPlayer
-////        AndroidView(
-////            factory = { ctx ->
-////                PlayerView(ctx).apply {
-////                    this.player = player
-////                    layoutParams = FrameLayout.LayoutParams(
-////                        ViewGroup.LayoutParams.MATCH_PARENT,
-////                        ViewGroup.LayoutParams.MATCH_PARENT
-////                    )
-////                    useController = true
-////                    setShowNextButton(false)
-////                    setShowPreviousButton(false)
-////                }
-////            },
-////            modifier = Modifier.fillMaxSize()
-////        )
-////
-////        // Live indicator overlay (top-left)
-////        Row(
-////            modifier = Modifier
-////                .align(Alignment.TopStart)
-////                .padding(20.dp)
-////                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-////                .padding(horizontal = 12.dp, vertical = 6.dp),
-////            verticalAlignment = Alignment.CenterVertically,
-////            horizontalArrangement = Arrangement.spacedBy(6.dp)
-////        ) {
-////            // Pulsing dot
-////            val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "dot")
-////            val alpha by inf.animateFloat(
-////                0.5f, 1f,
-////                androidx.compose.animation.core.infiniteRepeatable(
-////                    androidx.compose.animation.core.tween(700),
-////                    androidx.compose.animation.core.RepeatMode.Reverse
-////                ),
-////                "a"
-////            )
-////            Box(
-////                Modifier.size(8.dp)
-////                    .background(NetflixRed.copy(alpha), androidx.compose.foundation.shape.CircleShape)
-////            )
-////            Text("LIVE", fontSize = androidx.compose.ui.unit.sp(12),
-////                fontWeight = FontWeight.Black, color = White)
-////        }
-////
-////        // Viewer count (top-right)
-////        Row(
-////            modifier = Modifier
-////                .align(Alignment.TopEnd)
-////                .padding(20.dp)
-////                .background(Color.Black.copy(0.7f), androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-////                .padding(horizontal = 12.dp, vertical = 6.dp),
-////            verticalAlignment = Alignment.CenterVertically,
-////            horizontalArrangement = Arrangement.spacedBy(6.dp)
-////        ) {
-////            Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
-////            Text(
-////                stream.formattedViewerCount(),
-////                fontSize = androidx.compose.ui.unit.sp(12),
-////                color = White
-////            )
-////        }
-////    }
-////}
+private fun formatViewers(count: Int): String = when {
+    count < 1_000     -> "$count"
+    count < 1_000_000 -> "${count / 1_000}K"
+    else              -> "${count / 1_000_000}M"
+}

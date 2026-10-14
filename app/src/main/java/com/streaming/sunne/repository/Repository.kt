@@ -4,6 +4,9 @@ import com.streaming.sunne.data.model.*
 import com.streaming.sunne.data.network.RetrofitClient
 import com.streaming.sunne.data.network.TokenManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -22,6 +25,29 @@ private suspend inline fun <T> safeCall(
         } else {
             Result.failure(Exception("API error ${response.code()}: ${response.message()}"))
         }
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+}
+
+/** Reads a `/stream` endpoint body (`url` or `stream_url`), falling back to [fallbackUrl]. */
+private suspend fun fetchStreamUrl(
+    call: suspend () -> retrofit2.Response<Map<String, Any>>,
+    fallbackUrl: suspend () -> String?
+): Result<StreamUrlResponse> = withContext(Dispatchers.IO) {
+    try {
+        val response = call()
+        val body = if (response.isSuccessful) response.body() else null
+        val url = (body?.get("url") ?: body?.get("stream_url"))?.toString()
+        if (!url.isNullOrBlank()) {
+            return@withContext Result.success(StreamUrlResponse(url, body?.get("quality")?.toString()))
+        }
+        val fallback = fallbackUrl()
+        if (!fallback.isNullOrBlank()) Result.success(StreamUrlResponse(fallback))
+        else Result.failure(Exception(
+            if (response.isSuccessful) "No stream available for this title"
+            else "Stream unavailable (${response.code()})"
+        ))
     } catch (e: Exception) {
         Result.failure(e)
     }
@@ -109,37 +135,10 @@ class MovieRepository {
         safeCall { api.getRecentMovies(limit) }
 
     suspend fun getStreamUrl(movieId: Int, quality: String = "1080p"): Result<StreamUrlResponse> =
-        withContext(Dispatchers.IO) {
-            try {
-                val response = api.getStreamUrl(movieId, quality)
-                if (response.isSuccessful) {
-                    val body = response.body()
-                    val url = body?.get("url")?.toString()
-                    if (!url.isNullOrBlank()) {
-                        val q = body["quality"]?.toString()
-                        Result.success(StreamUrlResponse(url = url, quality = q))
-                    } else {
-                        val movie = api.getMovie(movieId).body()
-                        val fallback = movie?.videoUrl
-                        if (!fallback.isNullOrBlank()) {
-                            Result.success(StreamUrlResponse(url = fallback))
-                        } else {
-                            Result.failure(Exception("No stream URL available"))
-                        }
-                    }
-                } else {
-                    val movie = api.getMovie(movieId).body()
-                    val fallback = movie?.videoUrl
-                    if (!fallback.isNullOrBlank()) {
-                        Result.success(StreamUrlResponse(url = fallback))
-                    } else {
-                        Result.failure(Exception("Stream unavailable (${response.code()})"))
-                    }
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
+        fetchStreamUrl(
+            call        = { api.getStreamUrl(movieId, quality) },
+            fallbackUrl = { api.getMovie(movieId).body()?.videoUrl }
+        )
 
     suspend fun incrementViewCount(movieId: Int) {
         withContext(Dispatchers.IO) {
@@ -175,6 +174,14 @@ class SeriesRepository {
 
     suspend fun getSeries(seriesId: Int): Result<SeriesResponse> =
         safeCall { api.getSeries(seriesId) }
+
+    suspend fun getEpisodeStreamUrl(
+        episode: EpisodeResponse, quality: String = "1080p"
+    ): Result<StreamUrlResponse> =
+        fetchStreamUrl(
+            call        = { api.getEpisodeStreamUrl(episode.id, quality) },
+            fallbackUrl = { episode.videoUrl }
+        )
 
     suspend fun getFeaturedSeries(limit: Int = 10): Result<List<SeriesResponse>> =
         withContext(Dispatchers.IO) {
@@ -220,7 +227,7 @@ class WatchRepository {
             : Result<List<WatchHistoryResponse>> =
         safeCall { api.getWatchHistory(completedOnly, limit) }
 
-    suspend fun getContinueWatching(limit: Int = 10): Result<List<WatchHistoryResponse>> =
+    suspend fun getContinueWatching(limit: Int = 10): Result<List<ContinueWatchingMovie>> =
         safeCall { api.getContinueWatching(limit) }
 
     suspend fun clearHistory(): Result<Unit> = withContext(Dispatchers.IO) {
@@ -271,10 +278,10 @@ class EpisodeWatchRepository {
             catch (e: Exception) { Result.failure(e) }
         }
 
-    suspend fun getSeriesProgress(seriesId: Int): Result<Map<String, Any>> =
+    suspend fun getSeriesProgress(seriesId: Int): Result<List<EpisodeProgressItem>> =
         safeCall { api.getSeriesProgress(seriesId) }
 
-    suspend fun getContinueWatchingSeries(limit: Int = 10): Result<List<Map<String, Any>>> =
+    suspend fun getContinueWatchingSeries(limit: Int = 10): Result<List<SeriesContinueWatching>> =
         safeCall { api.getContinueWatchingSeries(limit) }
 
     suspend fun rateSeries(seriesId: Int, rating: Int, review: String? = null)
@@ -346,10 +353,10 @@ class RecommendationRepository {
 class PlayNextRepository {
     private val api = RetrofitClient.apiService
 
-    suspend fun getNextAfterEpisode(episodeId: Int): Result<Map<String, Any>> =
+    suspend fun getNextAfterEpisode(episodeId: Int): Result<PlayNextResponse> =
         safeCall { api.getPlayNextAfterEpisode(episodeId) }
 
-    suspend fun getNextAfterMovie(movieId: Int): Result<Map<String, Any>> =
+    suspend fun getNextAfterMovie(movieId: Int): Result<PlayNextResponse> =
         safeCall { api.getPlayNextAfterMovie(movieId) }
 }
 
@@ -394,86 +401,52 @@ class HomeContentRepository {
 
     /**
      * Builds all HomeScreen carousel rows with mixed content types.
+     * Rows load in parallel; a row that fails is skipped instead of failing the whole screen.
      */
     suspend fun getHomeContent(): Result<List<ContentRow>> = withContext(Dispatchers.IO) {
-        try {
-            val rows = mutableListOf<ContentRow>()
-
-            // Continue Watching (Movies + Series combined)
-            if (TokenManager.isLoggedIn) {
-                val continueMovies = watchRepo.getContinueWatching(10).getOrNull() ?: emptyList()
-                val continueSeries = episodeWatch.getContinueWatchingSeries(10).getOrNull() ?: emptyList()
-
-                val continueItems = mutableListOf<ContentItem>()
-                continueMovies.forEach { history ->
-                    movieRepo.getMovie(history.movieId).getOrNull()?.let {
-                        continueItems.add(ContentItem.Movie(it))
+        coroutineScope {
+            val continueWatching = async { continueWatchingRow() }
+            val fixedRows = listOf(
+                async { row("Live Now") { liveRepo.listStreams().getOrThrow().filter { it.isLive }.map { ContentItem.LiveStream(it) } } },
+                async { row("Featured Movies") { movieRepo.getFeaturedMovies(10).getOrThrow().map { ContentItem.Movie(it) } } },
+                async { row("Featured Series") { seriesRepo.getFeaturedSeries(10).getOrThrow().map { ContentItem.Series(it) } } },
+                async { row("Trending Now") { movieRepo.getTrendingMovies(10).getOrThrow().map { ContentItem.Movie(it) } } },
+                async { row("Trending Series") { seriesRepo.getTrendingSeries(10).getOrThrow().map { ContentItem.Series(it) } } },
+                async { row("Recently Added") { movieRepo.getRecentMovies(10).getOrThrow().map { ContentItem.Movie(it) } } },
+            )
+            val genres = runCatching { api.getGenres().body().orEmpty() }.getOrDefault(emptyList())
+            val genreRows = genres.map { genre ->
+                async {
+                    row(genre.name) {
+                        api.getMoviesByGenre(genre.id, pageSize = 10).body()?.movies.orEmpty()
+                            .map { ContentItem.Movie(it) }
                     }
                 }
-                // Note: continueSeries needs parsing — skip for now or implement parser
-
-                if (continueItems.isNotEmpty()) {
-                    rows.add(ContentRow("Continue Watching", continueItems))
-                }
             }
 
-            // Featured Movies
-            movieRepo.getFeaturedMovies(10).getOrNull()?.let { movies ->
-                if (movies.isNotEmpty()) {
-                    rows.add(ContentRow("Featured Movies", movies.map { ContentItem.Movie(it) }))
-                }
-            }
+            val rows = listOfNotNull(continueWatching.await()) +
+                fixedRows.awaitAll().filterNotNull() +
+                genreRows.awaitAll().filterNotNull()
 
-            // Featured Series
-            seriesRepo.getFeaturedSeries(10).getOrNull()?.let { series ->
-                if (series.isNotEmpty()) {
-                    rows.add(ContentRow("Featured Series", series.map { ContentItem.Series(it) }))
-                }
-            }
-
-            // Trending Movies
-            movieRepo.getTrendingMovies(10).getOrNull()?.let { movies ->
-                if (movies.isNotEmpty()) {
-                    rows.add(ContentRow("Trending Now", movies.map { ContentItem.Movie(it) }))
-                }
-            }
-
-            // Trending Series
-            seriesRepo.getTrendingSeries(10).getOrNull()?.let { series ->
-                if (series.isNotEmpty()) {
-                    rows.add(ContentRow("Trending Series", series.map { ContentItem.Series(it) }))
-                }
-            }
-
-            // Recently Added
-            movieRepo.getRecentMovies(10).getOrNull()?.let { movies ->
-                if (movies.isNotEmpty()) {
-                    rows.add(ContentRow("Recently Added", movies.map { ContentItem.Movie(it) }))
-                }
-            }
-
-            // Live Streams (if any active)
-            liveRepo.listStreams().getOrNull()?.let { streams ->
-                val live = streams.filter { it.isLive }
-                if (live.isNotEmpty()) {
-                    rows.add(ContentRow("🔴 Live Now", live.map { ContentItem.LiveStream(it) }))
-                }
-            }
-
-            // Genre rows
-            val genres = api.getGenres().body() ?: emptyList()
-            genres.forEach { genre ->
-                val genreMovies = api.getMoviesByGenre(genre.id, pageSize = 10).body()?.movies
-                if (!genreMovies.isNullOrEmpty()) {
-                    rows.add(ContentRow(genre.name, genreMovies.map { ContentItem.Movie(it) }))
-                }
-            }
-
-            Result.success(rows)
-        } catch (e: Exception) {
-            Result.failure(e)
+            if (rows.isEmpty()) Result.failure(Exception("Couldn't reach the server. Check your connection and try again."))
+            else Result.success(rows)
         }
     }
+
+    suspend fun continueWatchingRow(): ContentRow? {
+        if (!TokenManager.isLoggedIn) return null
+        return coroutineScope {
+            val movies = async { watchRepo.getContinueWatching(10).getOrNull().orEmpty() }
+            val series = async { episodeWatch.getContinueWatchingSeries(10).getOrNull().orEmpty() }
+            val items = movies.await().mapNotNull { h ->
+                h.movie?.let { ContentItem.Movie(it, progress = h.watchPercentage / 100f) }
+            } + series.await().map { ContentItem.ContinueSeries(it) }
+            if (items.isEmpty()) null else ContentRow(CONTINUE_WATCHING, items)
+        }
+    }
+
+    private suspend fun row(label: String, load: suspend () -> List<ContentItem>): ContentRow? =
+        runCatching { load() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { ContentRow(label, it) }
 
     /** Legacy compatibility — converts ContentRows back to MovieCategory */
     @Deprecated("Use getHomeContent() instead")
