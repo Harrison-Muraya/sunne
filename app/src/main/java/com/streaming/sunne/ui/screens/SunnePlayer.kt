@@ -60,6 +60,7 @@ fun SunnePlayer(
     val state     by viewModel.state.collectAsState()
     val upNext    by viewModel.upNext.collectAsState()
     var ended     by remember(playable.key) { mutableStateOf(false) }
+    LandscapeWhileVisible()
 
     LaunchedEffect(playable.key) {
         viewModel.start(playable, PlaybackPrefs.defaultQuality(context))

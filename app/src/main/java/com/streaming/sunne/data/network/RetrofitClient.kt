@@ -1,5 +1,6 @@
 package com.streaming.sunne.data.network
 
+import com.streaming.sunne.BuildConfig
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -75,18 +76,15 @@ class AuthInterceptor : Interceptor {
 
 /**
  * Singleton Retrofit client.
- * Update [BASE_URL] to point to your FastAPI server.
+ * The server URL comes from the `SUNNE_BASE_URL` Gradle property (see app/build.gradle).
  */
 object RetrofitClient {
 
-    // ── ✏️ Change this to your server URL ─────────────────────────────────────
-    // Android emulator  → "http://10.0.2.2:8000/"
-    // Physical device   → "http://192.168.1.XXX:8000/"
-    // Production        → "https://api.sunetv.com/"
-    const val BASE_URL = "http://197.248.201.233:30000/"
+    const val BASE_URL = BuildConfig.BASE_URL
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
+        redactHeader("Authorization")
     }
 
     private val okHttpClient: OkHttpClient by lazy {

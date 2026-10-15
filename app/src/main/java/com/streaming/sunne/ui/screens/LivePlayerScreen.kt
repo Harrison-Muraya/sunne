@@ -44,6 +44,7 @@ fun LivePlayerScreen(
     val context = LocalContext.current
     val url = stream.streamUrl
     val viewerCount by viewModel.viewerCount.collectAsState()
+    LandscapeWhileVisible()
 
     var attempt by remember { mutableStateOf(0) }
     var isBuffering by remember { mutableStateOf(true) }

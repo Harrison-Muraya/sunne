@@ -1,7 +1,5 @@
 package com.streaming.sunne.ui.screens
 
-//package com.sune.tv.ui.screens
-
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*

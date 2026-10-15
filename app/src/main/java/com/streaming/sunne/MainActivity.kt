@@ -1,30 +1,42 @@
 package com.streaming.sunne
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
+import com.streaming.sunne.data.model.CatalogSource
 import com.streaming.sunne.data.model.ContentItem
 import com.streaming.sunne.data.network.SessionEvents
 import com.streaming.sunne.data.network.TokenManager
+import com.streaming.sunne.repository.LiveStreamRepository
+import com.streaming.sunne.repository.MovieRepository
+import com.streaming.sunne.repository.SeriesRepository
 import com.streaming.sunne.ui.screens.*
 import com.streaming.sunne.ui.theme.DarkBackground
+import com.streaming.sunne.ui.theme.NetflixRed
 import com.streaming.sunne.ui.theme.SunneTheme
 import com.streaming.sunne.viewmodel.AuthViewModel
 import com.streaming.sunne.viewmodel.LiveStreamViewModel
 import com.streaming.sunne.viewmodel.MovieViewModel
 import com.streaming.sunne.viewmodel.UpNext
+import com.streaming.sunne.viewmodel.friendlyMessage
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,6 +59,9 @@ fun SuneApp() {
     val navController  = rememberNavController()
     val authViewModel  : AuthViewModel  = viewModel()
     val movieViewModel : MovieViewModel = viewModel()
+    val movieRepo  = remember { MovieRepository() }
+    val seriesRepo = remember { SeriesRepository() }
+    val liveRepo   = remember { LiveStreamRepository() }
 
     LaunchedEffect(Unit) {
         if (TokenManager.isLoggedIn) authViewModel.loadCurrentUser()
@@ -64,6 +79,32 @@ fun SuneApp() {
     val selectedSeries  by movieViewModel.selectedSeries.collectAsState()
     val selectedEpisode by movieViewModel.selectedEpisode.collectAsState()
     val selectedStream  by movieViewModel.selectedLiveStream.collectAsState()
+
+    val openItem: (ContentItem) -> Unit = { item ->
+        when (item) {
+            is ContentItem.Movie -> {
+                movieViewModel.selectMovie(item.data)
+                navController.navigate(Screen.Details.of(item.data.id))
+            }
+            is ContentItem.Series -> {
+                movieViewModel.selectSeries(item.data)
+                navController.navigate(Screen.SeriesDetail.of(item.data.id))
+            }
+            is ContentItem.ContinueSeries -> movieViewModel.resumeSeries(
+                item      = item.data,
+                onPlay    = {
+                    selectedEpisodeId(movieViewModel)?.let {
+                        navController.navigate(Screen.EpisodePlayer.of(it, item.data.seriesId))
+                    }
+                },
+                onDetails = { navController.navigate(Screen.SeriesDetail.of(item.data.seriesId)) }
+            )
+            is ContentItem.LiveStream -> {
+                movieViewModel.selectLiveStream(item.data)
+                navController.navigate(Screen.LivePlayer.of(item.data.id))
+            }
+        }
+    }
 
     val start = if (TokenManager.isLoggedIn) Screen.Home.route else Screen.Splash.route
 
@@ -98,32 +139,15 @@ fun SuneApp() {
             HomeScreen(
                 viewModel     = movieViewModel,
                 authViewModel = authViewModel,
-                onItemClick   = { item ->
-                    when (item) {
-                        is ContentItem.Movie -> {
-                            movieViewModel.selectMovie(item.data)
-                            navController.navigate(Screen.Details.route)
-                        }
-                        is ContentItem.Series -> {
-                            movieViewModel.selectSeries(item.data)
-                            navController.navigate(Screen.SeriesDetail.route)
-                        }
-                        is ContentItem.ContinueSeries -> movieViewModel.resumeSeries(
-                            item      = item.data,
-                            onPlay    = { navController.navigate(Screen.EpisodePlayer.route) },
-                            onDetails = { navController.navigate(Screen.SeriesDetail.route) }
-                        )
-                        is ContentItem.LiveStream -> {
-                            movieViewModel.selectLiveStream(item.data)
-                            navController.navigate(Screen.LivePlayer.route)
-                        }
-                    }
-                },
+                onItemClick   = openItem,
                 onPlayMovie   = { movie ->
                     movieViewModel.selectMovie(movie)
-                    navController.navigate(Screen.Player.route)
+                    navController.navigate(Screen.Player.of(movie.id))
                 },
                 onLiveClick   = { navController.navigate(Screen.LiveStreamList.route) },
+                onSearchClick = { navController.navigate(Screen.Search.route) },
+                onMyListClick = { navController.navigate(Screen.MyList.route) },
+                onSeeAll      = { source -> navController.navigate(Screen.Catalog.of(source)) },
                 onLogout      = {
                     authViewModel.logout()
                     movieViewModel.reset()
@@ -132,47 +156,85 @@ fun SuneApp() {
             )
         }
 
-        composable(Screen.Details.route) { entry ->
-            RequireSelection(selectedMovie, navController, entry) { movie ->
+        composable(Screen.Search.route) {
+            SearchScreen(onItemClick = openItem, onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.MyList.route) {
+            MyListScreen(onItemClick = openItem, onBack = { navController.popBackStack() })
+        }
+
+        composable(
+            Screen.Catalog.route,
+            arguments = listOf(
+                navArgument("kind")    { type = NavType.StringType },
+                navArgument("title")   { type = NavType.StringType; defaultValue = "" },
+                navArgument("genreId") { type = NavType.IntType; defaultValue = -1 }
+            )
+        ) { entry ->
+            val args    = entry.arguments
+            val title   = args?.getString("title").orEmpty()
+            val genreId = args?.getInt("genreId")?.takeIf { it >= 0 }
+            val source  = if (args?.getString("kind") == "series") CatalogSource.Series(title.ifEmpty { "Series" }, genreId)
+                          else CatalogSource.Movies(title.ifEmpty { "Movies" }, genreId)
+            CatalogScreen(source = source, onItemClick = openItem, onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.Details.route, arguments = listOf(idArg("movieId"))) { entry ->
+            val movieId = entry.arguments?.getInt("movieId") ?: 0
+            LoadById(movieId, selectedMovie?.takeIf { it.id == movieId }, { movieRepo.getMovie(it) }) { movie ->
                 DetailsScreen(
                     movie       = movie,
-                    onPlayClick = { navController.navigate(Screen.Player.route) },
+                    onPlayClick = {
+                        movieViewModel.selectMovie(movie)
+                        navController.navigate(Screen.Player.of(movie.id))
+                    },
                     onBackClick = { navController.popBackStack() }
                 )
             }
         }
 
-        composable(Screen.Player.route) { entry ->
-            RequireSelection(selectedMovie, navController, entry) { movie ->
+        composable(Screen.Player.route, arguments = listOf(idArg("movieId"))) { entry ->
+            val movieId = entry.arguments?.getInt("movieId") ?: 0
+            LoadById(movieId, selectedMovie?.takeIf { it.id == movieId }, { movieRepo.getMovie(it) }) { movie ->
                 PlayerScreen(
                     movie       = movie,
                     onBackPress = { navController.popBackStack() },
-                    onUpNext    = { next -> handleUpNext(next, movieViewModel, navController, Screen.Player.route) }
+                    onUpNext    = { next -> handleUpNext(next, null, movieViewModel, navController, Screen.Player.route) }
                 )
             }
         }
 
-        composable(Screen.SeriesDetail.route) { entry ->
-            RequireSelection(selectedSeries, navController, entry) { series ->
-                SeriesDetailScreen(
-                    initial        = series,
-                    onEpisodeClick = { fullSeries, episode ->
-                        movieViewModel.selectSeries(fullSeries)
-                        movieViewModel.selectEpisode(episode)
-                        navController.navigate(Screen.EpisodePlayer.route)
-                    },
-                    onBackClick    = { navController.popBackStack() }
-                )
-            }
+        composable(Screen.SeriesDetail.route, arguments = listOf(idArg("seriesId"))) { entry ->
+            val seriesId = entry.arguments?.getInt("seriesId") ?: 0
+            SeriesDetailScreen(
+                seriesId       = seriesId,
+                initial        = selectedSeries?.takeIf { it.id == seriesId },
+                onEpisodeClick = { fullSeries, episode ->
+                    movieViewModel.selectSeries(fullSeries)
+                    movieViewModel.selectEpisode(episode)
+                    navController.navigate(Screen.EpisodePlayer.of(episode.id, fullSeries.id))
+                },
+                onBackClick    = { navController.popBackStack() }
+            )
         }
 
-        composable(Screen.EpisodePlayer.route) { entry ->
-            RequireSelection(selectedEpisode, navController, entry) { episode ->
+        composable(
+            Screen.EpisodePlayer.route,
+            arguments = listOf(idArg("episodeId"), navArgument("seriesId") { type = NavType.IntType; defaultValue = -1 })
+        ) { entry ->
+            val episodeId = entry.arguments?.getInt("episodeId") ?: 0
+            val seriesId  = entry.arguments?.getInt("seriesId")?.takeIf { it >= 0 }
+            val knownTitle = selectedSeries?.takeIf { it.id == seriesId }?.title
+            val seriesTitle by produceState(knownTitle, seriesId) {
+                if (value == null && seriesId != null) value = seriesRepo.getSeries(seriesId).getOrNull()?.title
+            }
+            LoadById(episodeId, selectedEpisode?.takeIf { it.id == episodeId }, { seriesRepo.getEpisode(it) }) { episode ->
                 EpisodePlayerScreen(
                     episode     = episode,
-                    seriesTitle = selectedSeries?.title,
+                    seriesTitle = seriesTitle,
                     onBackPress = { navController.popBackStack() },
-                    onUpNext    = { next -> handleUpNext(next, movieViewModel, navController, Screen.EpisodePlayer.route) }
+                    onUpNext    = { next -> handleUpNext(next, seriesId, movieViewModel, navController, Screen.EpisodePlayer.route) }
                 )
             }
         }
@@ -183,14 +245,15 @@ fun SuneApp() {
                 viewModel     = liveViewModel,
                 onStreamClick = { stream ->
                     movieViewModel.selectLiveStream(stream)
-                    navController.navigate(Screen.LivePlayer.route)
+                    navController.navigate(Screen.LivePlayer.of(stream.id))
                 },
                 onBackClick   = { navController.popBackStack() }
             )
         }
 
-        composable(Screen.LivePlayer.route) { entry ->
-            RequireSelection(selectedStream, navController, entry) { stream ->
+        composable(Screen.LivePlayer.route, arguments = listOf(idArg("streamId"))) { entry ->
+            val streamId = entry.arguments?.getInt("streamId") ?: 0
+            LoadById(streamId, selectedStream?.takeIf { it.id == streamId }, { liveRepo.getStream(it) }) { stream ->
                 val liveViewModel: LiveStreamViewModel = viewModel()
                 LivePlayerScreen(
                     stream      = stream,
@@ -202,25 +265,42 @@ fun SuneApp() {
     }
 }
 
-/** Selections live in [MovieViewModel]; if one is gone (e.g. after a reset) leave the screen. */
+private fun selectedEpisodeId(movieViewModel: MovieViewModel): Int? = movieViewModel.selectedEpisode.value?.id
+
+private fun idArg(name: String) = navArgument(name) { type = NavType.IntType }
+
+/**
+ * Shows [content] for the item with [id], using [cached] when the caller already has it
+ * and fetching otherwise (e.g. after the process was killed and the route was restored).
+ */
 @Composable
-private fun <T : Any> RequireSelection(
-    value: T?,
-    navController: NavHostController,
-    entry: NavBackStackEntry,
+private fun <T : Any> LoadById(
+    id: Int,
+    cached: T?,
+    load: suspend (Int) -> Result<T>,
     content: @Composable (T) -> Unit
 ) {
-    if (value != null) {
-        content(value)
-    } else {
-        LaunchedEffect(Unit) {
-            if (navController.currentBackStackEntry?.id == entry.id) navController.popBackStack()
+    var attempt by remember { mutableIntStateOf(0) }
+    var error   by remember(id) { mutableStateOf<String?>(null) }
+    val value by produceState(cached, id, attempt) {
+        if (value == null) {
+            error = null
+            load(id).onSuccess { value = it }.onFailure { error = friendlyMessage(it) }
+        }
+    }
+    val loaded = value
+    when {
+        loaded != null -> content(loaded)
+        error != null  -> ErrorScreen(error!!) { attempt++ }
+        else -> Box(Modifier.fillMaxSize().background(DarkBackground), Alignment.Center) {
+            CircularProgressIndicator(color = NetflixRed)
         }
     }
 }
 
 private fun handleUpNext(
     next: UpNext,
+    seriesId: Int?,
     movieViewModel: MovieViewModel,
     navController: NavHostController,
     currentRoute: String
@@ -228,20 +308,18 @@ private fun handleUpNext(
     when (next) {
         is UpNext.Movie -> {
             movieViewModel.selectMovie(next.movie)
-            navController.navigate(Screen.Player.route) {
+            navController.navigate(Screen.Player.of(next.movie.id)) {
                 popUpTo(currentRoute) { inclusive = true }
             }
         }
         is UpNext.Episode -> {
             movieViewModel.selectEpisode(next.episode)
-            if (currentRoute != Screen.EpisodePlayer.route) {
-                navController.navigate(Screen.EpisodePlayer.route) {
-                    popUpTo(currentRoute) { inclusive = true }
-                }
+            navController.navigate(Screen.EpisodePlayer.of(next.episode.id, seriesId)) {
+                popUpTo(currentRoute) { inclusive = true }
             }
         }
-        is UpNext.Series -> movieViewModel.openSeries(next.seriesId) {
-            navController.navigate(Screen.SeriesDetail.route) {
+        is UpNext.Series -> {
+            navController.navigate(Screen.SeriesDetail.of(next.seriesId)) {
                 popUpTo(currentRoute) { inclusive = true }
             }
         }
@@ -261,10 +339,32 @@ sealed class Screen(val route: String) {
     object Login          : Screen("login")
     object Register       : Screen("register")
     object Home           : Screen("home")
-    object Details        : Screen("details")
-    object Player         : Screen("player")
-    object SeriesDetail   : Screen("series-detail")
-    object EpisodePlayer  : Screen("episode-player")
-    object LiveStreamList : Screen("live-stream-list")
-    object LivePlayer     : Screen("live-player")
+    object Search         : Screen("search")
+    object MyList         : Screen("my-list")
+    object LiveStreamList : Screen("live")
+
+    object Details : Screen("details/{movieId}") {
+        fun of(movieId: Int) = "details/$movieId"
+    }
+    object Player : Screen("play/movie/{movieId}") {
+        fun of(movieId: Int) = "play/movie/$movieId"
+    }
+    object SeriesDetail : Screen("series/{seriesId}") {
+        fun of(seriesId: Int) = "series/$seriesId"
+    }
+    object EpisodePlayer : Screen("play/episode/{episodeId}?seriesId={seriesId}") {
+        fun of(episodeId: Int, seriesId: Int?) = "play/episode/$episodeId?seriesId=${seriesId ?: -1}"
+    }
+    object LivePlayer : Screen("live/{streamId}") {
+        fun of(streamId: Int) = "live/$streamId"
+    }
+    object Catalog : Screen("catalog/{kind}?title={title}&genreId={genreId}") {
+        fun of(source: CatalogSource): String {
+            val (kind, genreId) = when (source) {
+                is CatalogSource.Movies -> "movies" to source.genreId
+                is CatalogSource.Series -> "series" to source.genreId
+            }
+            return "catalog/$kind?title=${Uri.encode(source.title)}&genreId=${genreId ?: -1}"
+        }
+    }
 }
