@@ -17,7 +17,7 @@ import com.streaming.sunne.ui.theme.White
 import kotlinx.coroutines.delay
 
 /**
- * Splash Screen - Shows Sune logo with fade-in animation
+ * Splash Screen - Shows Sunne logo with fade-in animation
  * Automatically navigates to Home after 2 seconds
  */
 @Composable

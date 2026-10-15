@@ -217,7 +217,7 @@ private fun PhoneTopBar(adaptive: Adaptive, username: String, onSearchClick: () 
         modifier = Modifier.fillMaxWidth().padding(horizontal = adaptive.pad, vertical = 14.dp),
         verticalAlignment     = Alignment.CenterVertically
     ) {
-        Text("SUNE", fontSize = adaptive.logo, fontWeight = FontWeight.Black,
+        Text("SUNNE", fontSize = adaptive.logo, fontWeight = FontWeight.Black,
             color = NetflixRed, letterSpacing = sp(4), modifier = Modifier.weight(1f))
         SearchIconButton(onSearchClick)
         Spacer(Modifier.width(8.dp))
@@ -267,7 +267,7 @@ private fun TvTopBar(
     ) {
         // Logo
         Text(
-            "SUNE",
+            "SUNNE",
             fontSize      = adaptive.logo,
             fontWeight    = FontWeight.Black,
             color         = NetflixRed,
@@ -442,7 +442,7 @@ private fun HeroBanner(
                     .padding(horizontal = adaptive.pad, vertical = 14.dp),
                 verticalAlignment     = Alignment.CenterVertically
             ) {
-                Text("SUNE", fontSize = adaptive.logo, fontWeight = FontWeight.Black,
+                Text("SUNNE", fontSize = adaptive.logo, fontWeight = FontWeight.Black,
                     color = NetflixRed, letterSpacing = sp(4), modifier = Modifier.weight(1f))
                 SearchIconButton(onSearchClick)
                 Spacer(Modifier.width(8.dp))
