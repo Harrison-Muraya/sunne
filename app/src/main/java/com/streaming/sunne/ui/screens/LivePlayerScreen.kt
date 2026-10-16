@@ -1,7 +1,5 @@
 package com.streaming.sunne.ui.screens
 
-import android.view.ViewGroup
-import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -14,17 +12,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.ui.PlayerView
 import com.streaming.sunne.data.model.LiveStreamPublicResponse
 import com.streaming.sunne.ui.theme.DarkBackground
 import com.streaming.sunne.ui.theme.NetflixRed
@@ -44,7 +38,9 @@ fun LivePlayerScreen(
     val context = LocalContext.current
     val url = stream.streamUrl
     val viewerCount by viewModel.viewerCount.collectAsState()
-    LandscapeWhileVisible()
+    var holdMode by remember { mutableStateOf(HoldMode.Auto) }
+    var pictureFit by remember { mutableStateOf(PictureFit.Fit) }
+    PlaybackOrientation(holdMode)
 
     var attempt by remember { mutableStateOf(0) }
     var isBuffering by remember { mutableStateOf(true) }
@@ -101,20 +97,32 @@ fun LivePlayerScreen(
                 }
             }
 
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        layoutParams = FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
+            NetflixPlayer(
+                player = player,
+                title = stream.title,
+                onBack = onBackPress,
+                holdMode = holdMode,
+                onHoldMode = { holdMode = it },
+                pictureFit = pictureFit,
+                onPictureFit = { pictureFit = it },
+                topStart = { LiveDot(); Spacer(Modifier.width(8.dp)) },
+                topEnd = {
+                    Row(
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .background(Color.Black.copy(0.45f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
+                        Text(
+                            formatViewers(viewerCount ?: stream.viewerCount),
+                            fontSize = TextUnit(12f, TextUnitType.Sp),
+                            color = White
                         )
-                        useController = true
-                        setShowNextButton(false)
-                        setShowPreviousButton(false)
                     }
-                },
-                update = { it.player = player },
-                modifier = Modifier.fillMaxSize()
+                }
             )
 
             if (isBuffering && errorMessage == null) {
@@ -135,40 +143,8 @@ fun LivePlayerScreen(
             }
         }
 
-        if (errorMessage == null) {
-            Row(
-                modifier = Modifier.align(Alignment.TopStart).padding(end = 160.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                PlayerBackButton(onBackPress)
-                LiveDot()
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    stream.title,
-                    color = White,
-                    fontSize = TextUnit(15f, TextUnitType.Sp),
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(20.dp)
-                    .background(Color.Black.copy(0.7f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(Icons.Default.Visibility, null, tint = White, modifier = Modifier.size(16.dp))
-                Text(
-                    formatViewers(viewerCount ?: stream.viewerCount),
-                    fontSize = TextUnit(12f, TextUnitType.Sp),
-                    color = White
-                )
-            }
+        if (errorMessage != null || url.isNullOrBlank() || !stream.isLive) {
+            PlayerBackButton(onBackPress, Modifier.align(Alignment.TopStart))
         }
     }
 }

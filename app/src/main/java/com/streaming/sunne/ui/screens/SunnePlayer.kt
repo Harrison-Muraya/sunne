@@ -1,7 +1,5 @@
 package com.streaming.sunne.ui.screens
 
-import android.view.ViewGroup
-import android.widget.FrameLayout
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,13 +27,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.ui.StyledPlayerView
 import com.streaming.sunne.ui.theme.*
 import com.streaming.sunne.viewmodel.*
 import kotlinx.coroutines.delay
@@ -60,7 +56,9 @@ fun SunnePlayer(
     val state     by viewModel.state.collectAsState()
     val upNext    by viewModel.upNext.collectAsState()
     var ended     by remember(playable.key) { mutableStateOf(false) }
-    LandscapeWhileVisible()
+    var holdMode  by remember { mutableStateOf(HoldMode.Auto) }
+    var pictureFit by remember { mutableStateOf(PictureFit.Fit) }
+    PlaybackOrientation(holdMode)
 
     LaunchedEffect(playable.key) {
         viewModel.start(playable, PlaybackPrefs.defaultQuality(context))
@@ -85,6 +83,11 @@ fun SunnePlayer(
                 source          = s.source,
                 title           = playable.title,
                 qualities       = playable.qualities,
+                holdMode        = holdMode,
+                onHoldMode      = { holdMode = it },
+                pictureFit      = pictureFit,
+                onPictureFit    = { pictureFit = it },
+                onBack          = onBack,
                 onStarted       = viewModel::onPlaybackStarted,
                 onProgress      = viewModel::saveProgress,
                 onNearEnd       = viewModel::loadUpNext,
@@ -94,7 +97,9 @@ fun SunnePlayer(
             )
         }
 
-        PlayerBackButton(onBack, Modifier.align(Alignment.TopStart))
+        if (state !is PlaybackState.Ready) {
+            PlayerBackButton(onBack, Modifier.align(Alignment.TopStart))
+        }
 
         if (ended) {
             when (val next = upNext) {
@@ -116,6 +121,11 @@ private fun VideoSurface(
     source: PlaybackSource,
     title: String,
     qualities: List<String>,
+    holdMode: HoldMode,
+    onHoldMode: (HoldMode) -> Unit,
+    pictureFit: PictureFit,
+    onPictureFit: (PictureFit) -> Unit,
+    onBack: () -> Unit,
     onStarted: () -> Unit,
     onProgress: (positionMs: Long, durationMs: Long) -> Unit,
     onNearEnd: () -> Unit,
@@ -194,35 +204,23 @@ private fun VideoSurface(
     }
 
     Box(Modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { ctx ->
-                StyledPlayerView(ctx).apply {
-                    this.player = player
-                    useController = true
-                    keepScreenOn = true
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                }
-            },
-            update = { it.player = player },
-            modifier = Modifier.fillMaxSize()
+        NetflixPlayer(
+            player         = player,
+            title          = title,
+            onBack         = onBack,
+            holdMode       = holdMode,
+            onHoldMode     = onHoldMode,
+            pictureFit     = pictureFit,
+            onPictureFit   = onPictureFit,
+            qualities      = qualities,
+            currentQuality = source.quality,
+            onQuality      = { q -> if (q != source.quality) onQualityChange(q, player.currentPosition) }
         )
 
         if (isBuffering && errorMessage == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = NetflixRed, modifier = Modifier.size(52.dp))
             }
-        }
-
-        if (qualities.size > 1) {
-            QualityButton(
-                current   = source.quality,
-                qualities = qualities,
-                onSelect  = { q -> if (q != source.quality) onQualityChange(q, player.currentPosition) },
-                modifier  = Modifier.align(Alignment.TopEnd)
-            )
         }
 
         AnimatedVisibility(
@@ -258,19 +256,20 @@ private fun VideoSurface(
 }
 
 @Composable
-private fun QualityButton(
+internal fun QualityButton(
     current: String?,
     qualities: List<String>,
     onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMenu: (Boolean) -> Unit = {}
 ) {
     var open by remember { mutableStateOf(false) }
-    Box(modifier.padding(20.dp)) {
+    Box(modifier.padding(horizontal = 4.dp)) {
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
                 .background(Color.Black.copy(alpha = 0.55f))
-                .clickable { open = true }
+                .clickable { open = true; onMenu(true) }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -278,9 +277,9 @@ private fun QualityButton(
             Icon(Icons.Default.Settings, "Quality", tint = White, modifier = Modifier.size(16.dp))
             Text(current ?: "Auto", fontSize = 13.sp, color = White, fontWeight = FontWeight.SemiBold)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false; onMenu(false) }) {
             qualities.forEach { q ->
-                DropdownMenuItem(onClick = { open = false; onSelect(q) }) {
+                DropdownMenuItem(onClick = { open = false; onMenu(false); onSelect(q) }) {
                     Text(
                         q,
                         fontWeight = if (q == current) FontWeight.Bold else FontWeight.Normal,
